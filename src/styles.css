@@ -1,0 +1,160 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Corrosion Lit Review — editorial lab-notebook design system.
+ * Warm off-white "paper" background, deep ink foreground, muted copper accent
+ * (a nod to metal corrosion). Serif display, clean sans body, geometric mono
+ * for numeric/data fields.
+ */
+
+@theme inline {
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-rule: var(--rule);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-copper: var(--copper);
+  --color-patina: var(--patina);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-state-filled: var(--state-filled);
+  --color-state-missing: var(--state-missing);
+  --color-state-na: var(--state-na);
+  --color-state-check: var(--state-check);
+}
+
+:root {
+  --radius: 0.375rem;
+
+  --paper: oklch(0.975 0.008 85);
+  --ink: oklch(0.22 0.02 60);
+  --ink-muted: oklch(0.48 0.02 60);
+  --rule: oklch(0.88 0.012 70);
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: oklch(0.99 0.005 85);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.99 0.005 85);
+  --popover-foreground: var(--ink);
+
+  --primary: oklch(0.52 0.13 45);       /* copper */
+  --primary-foreground: oklch(0.985 0.005 85);
+  --secondary: oklch(0.93 0.012 75);
+  --secondary-foreground: var(--ink);
+  --muted: oklch(0.94 0.008 80);
+  --muted-foreground: var(--ink-muted);
+  --accent: oklch(0.92 0.03 55);
+  --accent-foreground: var(--ink);
+
+  --copper: oklch(0.55 0.14 45);
+  --patina: oklch(0.62 0.08 175);
+
+  --destructive: oklch(0.55 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: var(--rule);
+  --input: oklch(0.9 0.012 75);
+  --ring: oklch(0.55 0.14 45);
+
+  --state-filled: oklch(0.55 0.11 155);   /* verdant green */
+  --state-missing: oklch(0.7 0.02 60);    /* neutral grey */
+  --state-na: oklch(0.5 0.015 60);        /* deeper grey */
+  --state-check: oklch(0.65 0.16 65);     /* amber */
+
+  --chart-1: oklch(0.55 0.14 45);
+  --chart-2: oklch(0.62 0.08 175);
+  --chart-3: oklch(0.55 0.11 155);
+  --chart-4: oklch(0.65 0.16 65);
+  --chart-5: oklch(0.48 0.02 60);
+}
+
+.dark {
+  --paper: oklch(0.19 0.012 65);
+  --ink: oklch(0.94 0.008 85);
+  --ink-muted: oklch(0.72 0.015 75);
+  --rule: oklch(0.32 0.015 65);
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: oklch(0.22 0.014 65);
+  --card-foreground: var(--ink);
+  --popover: oklch(0.24 0.014 65);
+  --popover-foreground: var(--ink);
+
+  --primary: oklch(0.68 0.14 55);
+  --primary-foreground: oklch(0.16 0.01 65);
+  --secondary: oklch(0.28 0.015 70);
+  --secondary-foreground: var(--ink);
+  --muted: oklch(0.26 0.012 70);
+  --muted-foreground: var(--ink-muted);
+  --accent: oklch(0.3 0.03 55);
+  --accent-foreground: var(--ink);
+
+  --copper: oklch(0.72 0.14 55);
+  --patina: oklch(0.7 0.09 175);
+
+  --destructive: oklch(0.65 0.2 27);
+  --destructive-foreground: oklch(0.99 0 0);
+  --border: var(--rule);
+  --input: oklch(0.36 0.014 70);
+  --ring: oklch(0.68 0.14 55);
+
+  --state-filled: oklch(0.7 0.12 155);
+  --state-missing: oklch(0.55 0.02 70);
+  --state-na: oklch(0.45 0.015 70);
+  --state-check: oklch(0.78 0.15 70);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html, body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  h1, h2, h3, .display {
+    font-family: var(--font-serif);
+    letter-spacing: -0.01em;
+    font-weight: 400;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--copper) 30%, transparent);
+  }
+}
+
+@utility field-tag {
+  @apply inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono;
+}
