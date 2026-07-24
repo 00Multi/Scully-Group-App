@@ -10,7 +10,9 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as ImportRouteImport } from './routes/import'
 import { Route as ExportRouteImport } from './routes/export'
+import { Route as BulkRouteImport } from './routes/bulk'
 import { Route as BrowseRouteImport } from './routes/browse'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -19,9 +21,19 @@ const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ImportRoute = ImportRouteImport.update({
+  id: '/import',
+  path: '/import',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ExportRoute = ExportRouteImport.update({
   id: '/export',
   path: '/export',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BulkRoute = BulkRouteImport.update({
+  id: '/bulk',
+  path: '/bulk',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BrowseRoute = BrowseRouteImport.update({
@@ -38,34 +50,49 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/browse': typeof BrowseRoute
+  '/bulk': typeof BulkRoute
   '/export': typeof ExportRoute
+  '/import': typeof ImportRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/browse': typeof BrowseRoute
+  '/bulk': typeof BulkRoute
   '/export': typeof ExportRoute
+  '/import': typeof ImportRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/browse': typeof BrowseRoute
+  '/bulk': typeof BulkRoute
   '/export': typeof ExportRoute
+  '/import': typeof ImportRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/browse' | '/export' | '/sitemap.xml'
+  fullPaths: '/' | '/browse' | '/bulk' | '/export' | '/import' | '/sitemap.xml'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/browse' | '/export' | '/sitemap.xml'
-  id: '__root__' | '/' | '/browse' | '/export' | '/sitemap.xml'
+  to: '/' | '/browse' | '/bulk' | '/export' | '/import' | '/sitemap.xml'
+  id:
+    | '__root__'
+    | '/'
+    | '/browse'
+    | '/bulk'
+    | '/export'
+    | '/import'
+    | '/sitemap.xml'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   BrowseRoute: typeof BrowseRoute
+  BulkRoute: typeof BulkRoute
   ExportRoute: typeof ExportRoute
+  ImportRoute: typeof ImportRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
 }
 
@@ -78,11 +105,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/import': {
+      id: '/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof ImportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/export': {
       id: '/export'
       path: '/export'
       fullPath: '/export'
       preLoaderRoute: typeof ExportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bulk': {
+      id: '/bulk'
+      path: '/bulk'
+      fullPath: '/bulk'
+      preLoaderRoute: typeof BulkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/browse': {
@@ -105,7 +146,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   BrowseRoute: BrowseRoute,
+  BulkRoute: BulkRoute,
   ExportRoute: ExportRoute,
+  ImportRoute: ImportRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
 }
 export const routeTree = rootRouteImport
