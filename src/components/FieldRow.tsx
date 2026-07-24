@@ -59,33 +59,24 @@ export function FieldRow({ field, value, onChange, onDelete }: Props) {
       </FieldTooltip>
 
       <div className="flex flex-col gap-1">
-        {field.type === "select" && field.options ? (
-          <input
-            list={`opts-${field.key}`}
-            value={local}
-            onChange={(e) => setLocal(e.target.value)}
-            onBlur={(e) => commit(e.target.value)}
-            placeholder={value.state === "na" ? "N/A" : "—"}
-            className="w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
-          />
-        ) : (
-          <input
-            type={field.type === "number" ? "text" : "text"}
-            inputMode={field.type === "number" ? "decimal" : undefined}
-            value={local}
-            onChange={(e) => setLocal(e.target.value)}
-            onBlur={(e) => commit(e.target.value)}
-            placeholder={value.state === "na" ? "N/A" : "—"}
-            className="w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
-          />
-        )}
-        {field.options && (
+        {/* Any field with options gets a dropdown (datalist) with free-text
+            fallback, regardless of its type. */}
+        <input
+          list={field.options?.length ? `opts-${field.key}` : undefined}
+          inputMode={field.type === "number" && !field.options?.length ? "decimal" : undefined}
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={(e) => commit(e.target.value)}
+          placeholder={value.state === "na" ? "N/A" : "—"}
+          className="w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
+        />
+        {field.options?.length ? (
           <datalist id={`opts-${field.key}`}>
             {field.options.map((o) => (
               <option key={o} value={o} />
             ))}
           </datalist>
-        )}
+        ) : null}
         {value.state === "needs_check" && (
           <input
             value={note}

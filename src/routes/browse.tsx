@@ -5,6 +5,7 @@ import { BrowseTree, type StateFilter } from "@/components/BrowseTree";
 import { PaperHeader } from "@/components/PaperHeader";
 import { ExperimentEditor } from "@/components/ExperimentEditor";
 import { PdfViewer } from "@/components/PdfViewer";
+import { PdfDropZone } from "@/components/PdfDropZone";
 import { useCategories, usePapers, useExperiments } from "@/lib/db";
 import type { Paper } from "@/lib/db";
 import { Columns2, FileText, Table2 } from "lucide-react";
@@ -30,10 +31,19 @@ export const Route = createFileRoute("/browse")({
   component: BrowsePage,
 });
 
-function DataPane({ paper, exps }: { paper: Paper; exps: ReturnType<typeof useExperiments>["data"] }) {
+function DataPane({
+  paper,
+  exps,
+  onCreated,
+}: {
+  paper: Paper;
+  exps: ReturnType<typeof useExperiments>["data"];
+  onCreated: (id: string) => void;
+}) {
   const list = exps ?? [];
   return (
     <div className="space-y-4">
+      <PdfDropZone onCreated={onCreated} />
       <PaperHeader paper={paper} nextPosition={list.length} />
       {list.map((exp) => (
         <ExperimentEditor key={exp.id} paper={paper} experiment={exp} />
@@ -136,7 +146,7 @@ function BrowsePage() {
 
             {mode === "data" && (
               <div className="flex-1 overflow-y-auto p-6">
-                <DataPane paper={selected} exps={selectedExps} />
+                <DataPane paper={selected} exps={selectedExps} onCreated={setSelectedId} />
               </div>
             )}
 
@@ -154,18 +164,22 @@ function BrowsePage() {
                 <Separator className="w-1.5 bg-rule/40 hover:bg-copper/60 transition-colors cursor-col-resize" />
                 <Panel defaultSize="50%" minSize="25%" className="min-h-0">
                   <div className="h-full overflow-y-auto p-6">
-                    <DataPane paper={selected} exps={selectedExps} />
+                    <DataPane paper={selected} exps={selectedExps} onCreated={setSelectedId} />
                   </div>
                 </Panel>
               </Group>
             )}
           </>
         ) : (
-          <div className="text-center py-24">
-            <h2 className="text-3xl font-serif italic">Empty database</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Pick a material category on the left and add your first paper.
-            </p>
+          <div className="flex-1 overflow-y-auto p-6">
+            <div className="max-w-2xl mx-auto mt-10">
+              <h2 className="text-3xl font-serif italic text-center">Empty database</h2>
+              <p className="mt-2 mb-6 text-sm text-muted-foreground text-center">
+                Add a paper from the tree on the left, or drop PDFs below to create papers with
+                metadata auto-filled.
+              </p>
+              <PdfDropZone onCreated={setSelectedId} />
+            </div>
           </div>
         )}
       </section>

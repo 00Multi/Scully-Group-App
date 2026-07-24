@@ -95,10 +95,6 @@ function Dashboard() {
     <div className="max-w-[1600px] mx-auto px-6 py-8">
       <header className="mb-8">
         <h1 className="text-5xl font-serif italic tracking-tight">Corrosion review</h1>
-        <p className="mt-2 text-sm text-muted-foreground max-w-2xl">
-          Structured database of molten-salt corrosion literature. Every value is a typed
-          field on a single experiment — legible for humans, exportable for models.
-        </p>
       </header>
 
       <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
@@ -335,22 +331,20 @@ function SchemaManager() {
                     className="bg-transparent border border-input rounded px-2 py-1 text-xs focus:border-primary focus:outline-none resize-y min-h-[2rem]"
                     aria-label="Definition"
                   />
-                  {f.type === "select" && (
-                    <input
-                      value={(f.options ?? []).join(", ")}
-                      onChange={(e) =>
-                        updateField(f.key, {
-                          options: e.target.value
-                            .split(",")
-                            .map((s) => s.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                      placeholder="Dropdown options, comma-separated"
-                      className="bg-muted/40 rounded px-2 py-1 text-xs font-mono focus:outline-none"
-                      aria-label="Dropdown options"
-                    />
-                  )}
+                  <input
+                    value={(f.options ?? []).join(", ")}
+                    onChange={(e) =>
+                      updateField(f.key, {
+                        options: e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="Dropdown options, comma-separated (leave blank for a free-text field)"
+                    className="bg-muted/40 rounded px-2 py-1 text-xs font-mono focus:outline-none"
+                    aria-label="Dropdown options"
+                  />
                 </div>
                 <button
                   onClick={() => {
