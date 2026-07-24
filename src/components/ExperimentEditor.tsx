@@ -64,7 +64,7 @@ export function ExperimentEditor({
   };
 
   return (
-    <div className="rounded-lg border border-rule bg-card">
+    <div className="@container rounded-lg border border-rule bg-card">
       <header className="flex items-center justify-between gap-2 px-5 py-3 border-b border-rule">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
@@ -88,7 +88,7 @@ export function ExperimentEditor({
         </button>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-x-8 gap-y-0 px-5 py-3">
+      <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-x-8 gap-y-0 px-5 py-3">
         {groups.map((group) => (
           <section key={group.id} className="min-w-0">
             <h4 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mt-2 mb-1">
