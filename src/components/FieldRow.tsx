@@ -48,9 +48,9 @@ export function FieldRow({ field, value, onChange, onDelete }: Props) {
   };
 
   return (
-    <div className="group grid grid-cols-[10rem_1fr_auto] items-start gap-3 py-2 border-b border-rule/60 last:border-0">
+    <div className="group grid grid-cols-[7rem_minmax(0,1fr)_auto] @sm:grid-cols-[9rem_minmax(0,1fr)_auto] items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
       <FieldTooltip field={field}>
-        <div className="pt-1.5 text-sm text-ink-muted cursor-help select-none">
+        <div className="pt-1.5 text-sm text-ink-muted cursor-help select-none break-words min-w-0">
           {field.label}
           {field.unit && (
             <span className="ml-1 text-xs text-muted-foreground font-mono">({field.unit})</span>
@@ -58,7 +58,7 @@ export function FieldRow({ field, value, onChange, onDelete }: Props) {
         </div>
       </FieldTooltip>
 
-      <div className="flex flex-col gap-1">
+      <div className="flex flex-col gap-1 min-w-0">
         {/* Any field with options gets a dropdown (datalist) with free-text
             fallback, regardless of its type. */}
         <input
@@ -88,12 +88,12 @@ export function FieldRow({ field, value, onChange, onDelete }: Props) {
         )}
       </div>
 
-      <div className="flex items-center gap-1 pt-0.5">
+      <div className="flex items-center gap-1 pt-0.5 shrink-0">
         <DropdownMenu>
           <DropdownMenuTrigger className="focus:outline-none">
-            <span className="inline-flex items-center gap-0.5">
+            <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
               <StateBadge state={value.state} />
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+              <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
             </span>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">

@@ -318,24 +318,10 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           <textarea
             value={state.abstract}
             onChange={(e) => setState({ ...state, abstract: e.target.value })}
-            onBlur={() => commit({ abstract: state.abstract })}
+            onBlur={() => commit({ abstract: state.abstract, summary: state.abstract })}
             onFocus={() => clearAuto("abstract")}
-            rows={3}
-            placeholder="Original abstract from paper"
-            className="w-full mt-1 bg-transparent border border-input rounded p-2 focus:border-primary focus:outline-none text-sm"
-          />
-        </div>
-        <div className="md:col-span-2">
-          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
-            Summary (editable) {autoHint("summary")}
-          </label>
-          <textarea
-            value={state.summary}
-            onChange={(e) => setState({ ...state, summary: e.target.value })}
-            onBlur={() => commit({ summary: state.summary })}
-            onFocus={() => clearAuto("summary")}
-            rows={3}
-            placeholder="Your working summary of the paper's findings"
+            rows={4}
+            placeholder="Abstract of the paper"
             className="w-full mt-1 bg-transparent border border-input rounded p-2 focus:border-primary focus:outline-none text-sm"
           />
         </div>
