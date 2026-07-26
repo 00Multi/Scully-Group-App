@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { BrowseTree, type StateFilter } from "@/components/BrowseTree";
 import { PaperHeader } from "@/components/PaperHeader";
@@ -12,7 +12,16 @@ import { Columns2, FileText, Table2 } from "lucide-react";
 
 type ViewMode = "data" | "split" | "paper";
 
+interface BrowseSearch {
+  paper?: string;
+  exp?: string;
+}
+
 export const Route = createFileRoute("/browse")({
+  validateSearch: (search: Record<string, unknown>): BrowseSearch => ({
+    paper: typeof search.paper === "string" ? search.paper : undefined,
+    exp: typeof search.exp === "string" ? search.exp : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Browse — Corrosion Literature Review" },
@@ -35,24 +44,30 @@ function DataPane({
   paper,
   exps,
   onCreated,
+  scrollRef,
+  onScroll,
 }: {
   paper: Paper;
   exps: ReturnType<typeof useExperiments>["data"];
   onCreated: (id: string) => void;
+  scrollRef: (el: HTMLDivElement | null) => void;
+  onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
 }) {
   const list = exps ?? [];
   return (
-    <div className="space-y-4">
-      <PdfDropZone onCreated={onCreated} />
-      <PaperHeader paper={paper} nextPosition={list.length} />
-      {list.map((exp) => (
-        <ExperimentEditor key={exp.id} paper={paper} experiment={exp} />
-      ))}
-      {list.length === 0 && (
-        <div className="text-sm text-muted-foreground italic p-6 border border-dashed border-rule rounded">
-          No experiments yet. Use "Add experiment" above.
-        </div>
-      )}
+    <div ref={scrollRef} onScroll={onScroll} className="h-full overflow-y-auto p-6">
+      <div className="space-y-4">
+        <PdfDropZone onCreated={onCreated} />
+        <PaperHeader paper={paper} nextPosition={list.length} />
+        {list.map((exp) => (
+          <ExperimentEditor key={exp.id} paper={paper} experiment={exp} />
+        ))}
+        {list.length === 0 && (
+          <div className="text-sm text-muted-foreground italic p-6 border border-dashed border-rule rounded">
+            No experiments yet. Use "Add experiment" above.
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -74,7 +89,9 @@ function ViewToggle({ mode, setMode }: { mode: ViewMode; setMode: (m: ViewMode) 
             onClick={() => setMode(o.key)}
             className={
               "inline-flex items-center gap-1 px-2.5 py-1 text-xs transition-colors " +
-              (active ? "bg-primary text-primary-foreground" : "hover:bg-accent text-muted-foreground")
+              (active
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-accent text-muted-foreground")
             }
           >
             <Icon className="h-3 w-3" />
@@ -87,15 +104,45 @@ function ViewToggle({ mode, setMode }: { mode: ViewMode; setMode: (m: ViewMode) 
 }
 
 function BrowsePage() {
+  const { paper: paperParam, exp: expParam } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { data: categories = [] } = useCategories();
   const { data: papers = [] } = usePapers();
   const { data: experiments = [] } = useExperiments();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedExpId, setSelectedExpId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
   const [mode, setMode] = useState<ViewMode>("data");
   const [userChoseMode, setUserChoseMode] = useState(false);
+
+  // Persisted scroll position for the data form pane, so switching view modes
+  // (which remounts the pane) does not reset the reader's place. (PRD F3)
+  const dataScrollTop = useRef(0);
+  const attachDataScroll = useCallback((el: HTMLDivElement | null) => {
+    if (el) el.scrollTop = dataScrollTop.current;
+  }, []);
+  const onDataScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    dataScrollTop.current = e.currentTarget.scrollTop;
+  }, []);
+
+  // Pending experiment id to scroll to once the pane has rendered.
+  const pendingScrollExp = useRef<string | null>(null);
+
+  // Apply an incoming deep-link (?paper=&exp=) once the data has loaded.
+  useEffect(() => {
+    if (paperParam && papers.some((p) => p.id === paperParam)) {
+      setSelectedId(paperParam);
+      if (expParam) {
+        setSelectedExpId(expParam);
+        pendingScrollExp.current = expParam;
+      }
+      // Clear the params so a later manual selection isn't overridden.
+      navigate({ search: {}, replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paperParam, expParam, papers]);
 
   useEffect(() => {
     if (!selectedId && papers.length > 0) setSelectedId(papers[0].id);
@@ -121,6 +168,33 @@ function BrowsePage() {
     setMode(m);
   };
 
+  const selectExperiment = (paperId: string, expId: string) => {
+    setSelectedId(paperId);
+    setSelectedExpId(expId);
+    pendingScrollExp.current = expId;
+    // Ensure the data form is visible.
+    if (mode === "paper") {
+      setUserChoseMode(true);
+      setMode(selected?.pdf_path ? "split" : "data");
+    }
+  };
+
+  // Scroll to the pending experiment after the relevant pane is on screen.
+  useEffect(() => {
+    const expId = pendingScrollExp.current;
+    if (!expId || mode === "paper") return;
+    const t = setTimeout(() => {
+      const el = document.getElementById(`exp-${expId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        el.classList.add("ring-2", "ring-copper");
+        setTimeout(() => el.classList.remove("ring-2", "ring-copper"), 1600);
+        pendingScrollExp.current = null;
+      }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [mode, selectedExpId, selectedId, selectedExps.length]);
+
   return (
     <div className="flex max-w-[1600px] mx-auto">
       <BrowseTree
@@ -128,7 +202,12 @@ function BrowsePage() {
         papers={papers}
         experiments={experiments}
         selectedPaperId={selectedId}
-        onSelectPaper={setSelectedId}
+        selectedExperimentId={selectedExpId}
+        onSelectPaper={(id) => {
+          setSelectedId(id);
+          setSelectedExpId(null);
+        }}
+        onSelectExperiment={selectExperiment}
         search={search}
         setSearch={setSearch}
         stateFilter={stateFilter}
@@ -145,8 +224,14 @@ function BrowsePage() {
             </div>
 
             {mode === "data" && (
-              <div className="flex-1 overflow-y-auto p-6">
-                <DataPane paper={selected} exps={selectedExps} onCreated={setSelectedId} />
+              <div className="flex-1 min-h-0">
+                <DataPane
+                  paper={selected}
+                  exps={selectedExps}
+                  onCreated={setSelectedId}
+                  scrollRef={attachDataScroll}
+                  onScroll={onDataScroll}
+                />
               </div>
             )}
 
@@ -163,9 +248,13 @@ function BrowsePage() {
                 </Panel>
                 <Separator className="w-1.5 bg-rule/40 hover:bg-copper/60 transition-colors cursor-col-resize" />
                 <Panel defaultSize="50%" minSize="25%" className="min-h-0">
-                  <div className="h-full overflow-y-auto p-6">
-                    <DataPane paper={selected} exps={selectedExps} onCreated={setSelectedId} />
-                  </div>
+                  <DataPane
+                    paper={selected}
+                    exps={selectedExps}
+                    onCreated={setSelectedId}
+                    scrollRef={attachDataScroll}
+                    onScroll={onDataScroll}
+                  />
                 </Panel>
               </Group>
             )}

@@ -77,11 +77,17 @@ export type Database = {
         Row: {
           abstract: string
           author: string
+          auto_filled: Json
           category_id: string | null
           citation_key: string
           created_at: string
           doi: string
           id: string
+          journal: string
+          meta: Json
+          notes: string
+          pdf_name: string
+          pdf_path: string
           summary: string
           title: string
           updated_at: string
@@ -90,11 +96,17 @@ export type Database = {
         Insert: {
           abstract?: string
           author?: string
+          auto_filled?: Json
           category_id?: string | null
           citation_key?: string
           created_at?: string
           doi?: string
           id?: string
+          journal?: string
+          meta?: Json
+          notes?: string
+          pdf_name?: string
+          pdf_path?: string
           summary?: string
           title?: string
           updated_at?: string
@@ -103,11 +115,17 @@ export type Database = {
         Update: {
           abstract?: string
           author?: string
+          auto_filled?: Json
           category_id?: string | null
           citation_key?: string
           created_at?: string
           doi?: string
           id?: string
+          journal?: string
+          meta?: Json
+          notes?: string
+          pdf_name?: string
+          pdf_path?: string
           summary?: string
           title?: string
           updated_at?: string

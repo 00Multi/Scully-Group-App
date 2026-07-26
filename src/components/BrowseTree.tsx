@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronRight, Plus, Search } from "lucide-react";
 import type { Category, Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
@@ -11,7 +11,9 @@ interface Props {
   papers: Paper[];
   experiments: Experiment[];
   selectedPaperId: string | null;
+  selectedExperimentId: string | null;
   onSelectPaper: (id: string) => void;
+  onSelectExperiment: (paperId: string, experimentId: string) => void;
   search: string;
   setSearch: (v: string) => void;
   stateFilter: StateFilter;
@@ -26,10 +28,7 @@ function matchesSearch(paper: Paper, exps: Experiment[], q: string) {
     .toLowerCase();
   if (hay.includes(needle)) return true;
   return exps.some((e) => {
-    const s = [
-      e.label,
-      ...Object.values(e.values).map((v) => (v?.value ?? "").toString()),
-    ]
+    const s = [e.label, ...Object.values(e.values).map((v) => (v?.value ?? "").toString())]
       .join(" ")
       .toLowerCase();
     return s.includes(needle);
@@ -38,9 +37,7 @@ function matchesSearch(paper: Paper, exps: Experiment[], q: string) {
 
 function matchesStateFilter(exps: Experiment[], filter: StateFilter) {
   if (filter === "any") return true;
-  return exps.some((e) =>
-    Object.values(e.values).some((v) => v?.state === filter),
-  );
+  return exps.some((e) => Object.values(e.values).some((v) => v?.state === filter));
 }
 
 export function BrowseTree({
@@ -48,7 +45,9 @@ export function BrowseTree({
   papers,
   experiments,
   selectedPaperId,
+  selectedExperimentId,
   onSelectPaper,
+  onSelectExperiment,
   search,
   setSearch,
   stateFilter,
@@ -57,7 +56,13 @@ export function BrowseTree({
   const [openCats, setOpenCats] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(categories.map((c) => [c.id, true])),
   );
+  const [openPapers, setOpenPapers] = useState<Record<string, boolean>>({});
   const createPaper = useCreatePaper();
+
+  // Keep the selected paper's experiments expanded so the active row is visible.
+  useEffect(() => {
+    if (selectedPaperId) setOpenPapers((s) => ({ ...s, [selectedPaperId]: true }));
+  }, [selectedPaperId]);
 
   const grouped = useMemo(() => {
     const byCat = new Map<string | null, Paper[]>();
@@ -75,6 +80,8 @@ export function BrowseTree({
       if (!m.has(e.paper_id)) m.set(e.paper_id, []);
       m.get(e.paper_id)!.push(e);
     }
+    for (const list of m.values())
+      list.sort((a, b) => a.position - b.position || a.created_at.localeCompare(b.created_at));
     return m;
   }, [experiments]);
 
@@ -126,25 +133,69 @@ export function BrowseTree({
                 </span>
               </button>
               {open && (
-                <div className="pl-4">
+                <div className="pl-2">
                   {catPapers.map((p) => {
                     const exps = expsByPaper.get(p.id) ?? [];
                     const active = p.id === selectedPaperId;
+                    const paperOpen = openPapers[p.id] ?? false;
                     return (
-                      <button
-                        key={p.id}
-                        onClick={() => onSelectPaper(p.id)}
-                        className={`w-full text-left px-3 py-1.5 text-sm hover:bg-accent/70 rounded-sm ${
-                          active ? "bg-accent text-foreground" : "text-ink-muted"
-                        }`}
-                      >
-                        <div className="font-serif italic">
-                          {p.citation_key || "Untitled"}
+                      <div key={p.id}>
+                        <div
+                          className={`group flex items-start rounded-sm ${
+                            active
+                              ? "bg-accent text-foreground"
+                              : "text-ink-muted hover:bg-accent/70"
+                          }`}
+                        >
+                          <button
+                            onClick={() => setOpenPapers((s) => ({ ...s, [p.id]: !paperOpen }))}
+                            className="pl-2 pt-2 shrink-0"
+                            aria-label={paperOpen ? "Collapse experiments" : "Expand experiments"}
+                          >
+                            <ChevronRight
+                              className={`h-3 w-3 text-muted-foreground transition-transform ${
+                                paperOpen ? "rotate-90" : ""
+                              } ${exps.length === 0 ? "opacity-20" : ""}`}
+                            />
+                          </button>
+                          <button
+                            onClick={() => {
+                              onSelectPaper(p.id);
+                              setOpenPapers((s) => ({ ...s, [p.id]: true }));
+                            }}
+                            className="flex-1 text-left px-2 py-1.5 text-sm min-w-0"
+                          >
+                            <div className="font-serif italic truncate">
+                              {p.citation_key || "Untitled"}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground font-mono">
+                              {exps.length} exp{exps.length === 1 ? "" : "s"}
+                            </div>
+                          </button>
                         </div>
-                        <div className="text-[10px] text-muted-foreground font-mono">
-                          {exps.length} exp{exps.length === 1 ? "" : "s"}
-                        </div>
-                      </button>
+                        {paperOpen && exps.length > 0 && (
+                          <ul className="ml-[1.35rem] border-l border-rule/60 pl-1">
+                            {exps.map((e) => {
+                              const expActive = e.id === selectedExperimentId;
+                              return (
+                                <li key={e.id}>
+                                  <button
+                                    onClick={() => onSelectExperiment(p.id, e.id)}
+                                    className={`w-full text-left px-2 py-1 text-xs rounded-sm truncate ${
+                                      expActive
+                                        ? "bg-copper/15 text-foreground"
+                                        : "text-muted-foreground hover:bg-accent/60"
+                                    }`}
+                                    title={e.label}
+                                  >
+                                    {e.label || "Untitled experiment"}
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
                     );
                   })}
                   <button

@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useImportData, type ImportPaperInput } from "@/lib/db";
-import { useFieldDefs } from "@/lib/settings";
-import { parseWorkbook } from "@/lib/xlsx-import";
+import { useFieldDefs, useSettings } from "@/lib/settings";
+import { parseWorkbook, type ImportResult } from "@/lib/xlsx-import";
 import { FileSpreadsheet, Loader2, UploadCloud } from "lucide-react";
 
 export const Route = createFileRoute("/import")({
@@ -28,13 +28,18 @@ function countFilled(p: ImportPaperInput): number {
 
 function ImportPage() {
   const fieldDefs = useFieldDefs();
+  const { addImportedFields } = useSettings();
   const importer = useImportData();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [parsing, setParsing] = useState(false);
-  const [parsed, setParsed] = useState<{ papers: ImportPaperInput[]; log: string[] } | null>(null);
+  const [parsed, setParsed] = useState<ImportResult | null>(null);
   const [fileName, setFileName] = useState("");
-  const [done, setDone] = useState<{ papers: number; experiments: number; categories: number } | null>(null);
+  const [done, setDone] = useState<{
+    papers: number;
+    experiments: number;
+    categories: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const onPick = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -49,8 +54,10 @@ function ImportPage() {
     try {
       const result = await parseWorkbook(file, fieldDefs);
       setParsed(result);
-    } catch (err: any) {
-      setError(err?.message ?? "Could not read that file. Is it an .xlsx workbook?");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Could not read that file. Is it an .xlsx workbook?",
+      );
     } finally {
       setParsing(false);
     }
@@ -60,11 +67,14 @@ function ImportPage() {
     if (!parsed) return;
     setError(null);
     try {
+      // Register any newly-discovered fields into the live schema first so the
+      // imported values are visible and editable in Browse.
+      if (parsed.newFields.length) addImportedFields(parsed.newFields);
       const res = await importer.mutateAsync(parsed.papers);
       setDone(res);
       setParsed(null);
-    } catch (err: any) {
-      setError(err?.message ?? "Import failed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed.");
     }
   };
 
@@ -74,9 +84,12 @@ function ImportPage() {
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
         Reads the existing corrosion-review workbook (.xlsx), maps each section header to a material
         category, parses <span className="font-mono">Author Year</span> into papers, and splits the{" "}
-        <span className="font-mono">Label: value</span> group cells into typed fields on one experiment
-        per row. Anything it can't match is listed in the log so you can fix it by hand — nothing is
-        silently dropped.
+        <span className="font-mono">Label: value</span> group cells into typed fields. Cells that
+        describe several conditions (e.g. <span className="font-mono">static vs flowing</span>,{" "}
+        <span className="font-mono">Ni / graphite</span>) become separate experiment rows, and
+        labels not already in the schema are added as new data points (Missing everywhere else) —
+        nothing is silently dropped. The log lists every split, new field, and ambiguous cell for
+        review.
       </p>
 
       <div className="mt-8 rounded-lg border border-rule bg-card p-5">
@@ -86,7 +99,11 @@ function ImportPage() {
           disabled={parsing}
           className="inline-flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
         >
-          {parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+          {parsing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <UploadCloud className="h-4 w-4" />
+          )}
           Choose .xlsx file
         </button>
         {fileName && (
@@ -105,8 +122,15 @@ function ImportPage() {
       {done && (
         <div className="mt-4 rounded-lg border border-state-filled/40 bg-state-filled/5 p-4 text-sm">
           Imported <strong>{done.papers}</strong> papers and <strong>{done.experiments}</strong>{" "}
-          experiments{done.categories ? `, creating ${done.categories} new categor${done.categories === 1 ? "y" : "ies"}` : ""}.
-          Open <a href="/browse" className="text-copper hover:underline">Browse</a> to review.
+          experiments
+          {done.categories
+            ? `, creating ${done.categories} new categor${done.categories === 1 ? "y" : "ies"}`
+            : ""}
+          . Open{" "}
+          <a href="/browse" className="text-copper hover:underline">
+            Browse
+          </a>{" "}
+          to review.
         </div>
       )}
 
@@ -140,7 +164,9 @@ function ImportPage() {
                   className="grid grid-cols-[1fr_10rem_5rem_6rem] gap-3 px-4 py-1.5 border-b border-rule/60 last:border-0 text-sm items-center"
                 >
                   <div className="truncate font-mono">{p.author}</div>
-                  <div className="truncate text-muted-foreground text-xs">{p.category_name ?? "—"}</div>
+                  <div className="truncate text-muted-foreground text-xs">
+                    {p.category_name ?? "—"}
+                  </div>
                   <div className="font-mono text-xs">{p.year ?? "—"}</div>
                   <div className="font-mono text-xs">{countFilled(p)} filled</div>
                 </div>
