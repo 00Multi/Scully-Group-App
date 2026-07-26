@@ -20,6 +20,7 @@ import {
 import type { Category, Experiment } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
+import { DangerZone } from "@/components/DangerZone";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
@@ -286,6 +287,8 @@ function Dashboard() {
       <CategoryManager categories={categories} />
 
       <SchemaManager />
+
+      <DangerZone />
     </div>
   );
 }
