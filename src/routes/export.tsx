@@ -1,9 +1,32 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useCategories, usePapers, useExperiments } from "@/lib/db";
+import type { Experiment } from "@/lib/db";
+import type { FieldState } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { downloadXlsx, openPrintReport, type ExportData } from "@/lib/xlsx-export";
-import { FileJson, FileSpreadsheet, Printer } from "lucide-react";
+import { Braces, FileJson, FileSpreadsheet, Printer, Search } from "lucide-react";
+
+type StateFilter = "any" | FieldState;
+
+function expMatchesSearch(
+  exps: Experiment[],
+  author: string,
+  year: number | null,
+  extras: string[],
+  q: string,
+) {
+  if (!q) return true;
+  const needle = q.toLowerCase();
+  const base = [author, String(year ?? ""), ...extras].join(" ").toLowerCase();
+  if (base.includes(needle)) return true;
+  return exps.some((e) =>
+    [e.label, ...Object.values(e.values).map((v) => (v?.value ?? "").toString())]
+      .join(" ")
+      .toLowerCase()
+      .includes(needle),
+  );
+}
 
 export const Route = createFileRoute("/export")({
   head: () => ({
@@ -17,7 +40,8 @@ export const Route = createFileRoute("/export")({
       { property: "og:title", content: "Export — Corrosion Literature Review" },
       {
         property: "og:description",
-        content: "Download the dataset as JSONL, XLSX, or a PDF report — respecting the category filter.",
+        content:
+          "Download the dataset as JSONL, XLSX, or a PDF report — respecting the category filter.",
       },
     ],
   }),
@@ -31,15 +55,45 @@ function ExportPage() {
   const { groups, fieldDefs } = useSettings();
   const [preview, setPreview] = useState(false);
   const [selectedCats, setSelectedCats] = useState<Set<string>>(() => new Set());
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<StateFilter>("any");
 
   const catActive = (id: string | null) =>
-    selectedCats.size === 0 || (id != null && selectedCats.has(id)) || (id == null && selectedCats.has("__uncat__"));
+    selectedCats.size === 0 ||
+    (id != null && selectedCats.has(id)) ||
+    (id == null && selectedCats.has("__uncat__"));
 
-  const filteredPapers = useMemo(() => papers.filter((p) => catActive(p.category_id)), [papers, selectedCats]);
+  const expsByPaper = useMemo(() => {
+    const m = new Map<string, Experiment[]>();
+    for (const e of experiments) {
+      if (!m.has(e.paper_id)) m.set(e.paper_id, []);
+      m.get(e.paper_id)!.push(e);
+    }
+    return m;
+  }, [experiments]);
+
+  const filteredPapers = useMemo(
+    () =>
+      papers.filter((p) => {
+        if (!catActive(p.category_id)) return false;
+        const exps = expsByPaper.get(p.id) ?? [];
+        if (!expMatchesSearch(exps, p.author, p.year, [p.title, p.doi, p.citation_key], search))
+          return false;
+        return true;
+      }),
+    [papers, selectedCats, search, expsByPaper],
+  );
   const paperIds = useMemo(() => new Set(filteredPapers.map((p) => p.id)), [filteredPapers]);
   const filteredExps = useMemo(
-    () => experiments.filter((e) => paperIds.has(e.paper_id)),
-    [experiments, paperIds],
+    () =>
+      experiments.filter((e) => {
+        if (!paperIds.has(e.paper_id)) return false;
+        if (stateFilter !== "any") {
+          return Object.values(e.values).some((v) => v?.state === stateFilter);
+        }
+        return true;
+      }),
+    [experiments, paperIds, stateFilter],
   );
 
   const exportData: ExportData = {
@@ -53,11 +107,12 @@ function ExportPage() {
   const toggleCat = (id: string) =>
     setSelectedCats((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
 
-  const jsonl = useMemo(() => {
+  const { schema, records } = useMemo(() => {
     const catById = new Map(categories.map((c) => [c.id, c]));
     const paperById = new Map(filteredPapers.map((p) => [p.id, p]));
     const schema = {
@@ -74,12 +129,12 @@ function ExportPage() {
       })),
       states: ["filled", "missing", "na", "needs_check"],
     };
-    const lines: string[] = [JSON.stringify(schema)];
+    const records: unknown[] = [];
     for (const e of filteredExps) {
       const p = paperById.get(e.paper_id);
       if (!p) continue;
       const cat = p.category_id ? catById.get(p.category_id) : null;
-      const record = {
+      records.push({
         experiment_id: e.id,
         paper: {
           id: p.id,
@@ -97,24 +152,38 @@ function ExportPage() {
         fields: Object.fromEntries(
           fieldDefs.map((f) => {
             const v = e.values?.[f.key] ?? { value: null, state: "missing" };
-            return [f.key, { value: v.state === "filled" ? v.value : null, state: v.state, note: v.note ?? null }];
+            return [
+              f.key,
+              {
+                value: v.state === "filled" ? v.value : null,
+                state: v.state,
+                note: v.note ?? null,
+              },
+            ];
           }),
         ),
-      };
-      lines.push(JSON.stringify(record));
+      });
     }
-    return lines.join("\n");
+    return { schema, records };
   }, [categories, filteredPapers, filteredExps, fieldDefs]);
 
-  const downloadJsonl = () => {
-    const blob = new Blob([jsonl], { type: "application/x-ndjson" });
+  const jsonl = useMemo(
+    () => [schema, ...records].map((x) => JSON.stringify(x)).join("\n"),
+    [schema, records],
+  );
+  const jsonDoc = useMemo(() => JSON.stringify({ schema, records }, null, 2), [schema, records]);
+
+  const downloadBlob = (content: string, mime: string, ext: string) => {
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `corrosion_review_${new Date().toISOString().slice(0, 10)}.jsonl`;
+    a.download = `corrosion_review_${new Date().toISOString().slice(0, 10)}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
   };
+  const downloadJsonl = () => downloadBlob(jsonl, "application/x-ndjson", "jsonl");
+  const downloadJson = () => downloadBlob(jsonDoc, "application/json", "json");
 
   const recordCount = filteredExps.length;
 
@@ -122,9 +191,10 @@ function ExportPage() {
     <div className="max-w-4xl mx-auto px-6 py-10">
       <h1 className="text-5xl font-serif italic">Export</h1>
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
-        Three output shapes: machine-readable <strong>JSONL</strong> for AI training, a human-readable{" "}
-        <strong>XLSX</strong> reproducing the four column groups, and a printable <strong>PDF report</strong>{" "}
-        grouped by material category. All three respect the category filter below.
+        Machine-readable <strong>JSONL</strong> or <strong>JSON</strong> for AI training, a
+        human-readable <strong>XLSX</strong> reproducing the four column groups, and a printable{" "}
+        <strong>PDF report</strong> grouped by material category. All formats respect the filter
+        below — category, search, and field state.
       </p>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-4">
@@ -132,47 +202,82 @@ function ExportPage() {
           Category filter
         </h3>
         <div className="flex flex-wrap gap-2">
-          {[...categories.map((c) => ({ id: c.id, name: c.name })), { id: "__uncat__", name: "Uncategorized" }].map(
-            (c) => {
-              const on = selectedCats.has(c.id);
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => toggleCat(c.id)}
-                  className={
-                    "rounded-full border px-3 py-1 text-xs transition-colors " +
-                    (on
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-rule text-muted-foreground hover:bg-accent")
-                  }
-                >
-                  {c.name}
-                </button>
-              );
-            },
-          )}
+          {[
+            ...categories.map((c) => ({ id: c.id, name: c.name })),
+            { id: "__uncat__", name: "Uncategorized" },
+          ].map((c) => {
+            const on = selectedCats.has(c.id);
+            return (
+              <button
+                key={c.id}
+                onClick={() => toggleCat(c.id)}
+                className={
+                  "rounded-full border px-3 py-1 text-xs transition-colors " +
+                  (on
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-rule text-muted-foreground hover:bg-accent")
+                }
+              >
+                {c.name}
+              </button>
+            );
+          })}
+        </div>
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_12rem] gap-2">
+          <div className="relative">
+            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter by author, salt, alloy, crucible…"
+              className="w-full pl-7 pr-2 py-1.5 text-xs bg-background border border-input rounded focus:outline-none focus:border-primary"
+            />
+          </div>
+          <select
+            value={stateFilter}
+            onChange={(e) => setStateFilter(e.target.value as StateFilter)}
+            className="py-1.5 px-2 text-xs bg-background border border-input rounded focus:outline-none"
+          >
+            <option value="any">Any field state</option>
+            <option value="missing">Has missing fields</option>
+            <option value="needs_check">Has needs-check</option>
+            <option value="na">Has N/A</option>
+            <option value="filled">Has filled</option>
+          </select>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          {selectedCats.size === 0
-            ? "All categories included."
-            : `${filteredPapers.length} papers · ${recordCount} experiments selected.`}
+          {selectedCats.size === 0 && !search && stateFilter === "any"
+            ? `All ${filteredPapers.length} papers · ${recordCount} experiments included.`
+            : `${filteredPapers.length} papers · ${recordCount} experiments match the current filter.`}
         </p>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
         <FormatCard
           icon={<FileJson className="h-5 w-5" />}
           title="JSONL"
-          desc="One record per experiment, typed, with explicit states and a schema header."
+          desc="One record per experiment, typed, with explicit states and a schema header line."
           action="Download .jsonl"
           onClick={downloadJsonl}
+        />
+        <FormatCard
+          icon={<Braces className="h-5 w-5" />}
+          title="JSON"
+          desc="A single { schema, records } document — same typed records, pretty-printed."
+          action="Download .json"
+          onClick={downloadJson}
         />
         <FormatCard
           icon={<FileSpreadsheet className="h-5 w-5" />}
           title="XLSX"
           desc="Four-column-group layout, one row per experiment, values human-readable."
           action="Download .xlsx"
-          onClick={() => downloadXlsx(exportData, `corrosion_review_${new Date().toISOString().slice(0, 10)}.xlsx`)}
+          onClick={() =>
+            downloadXlsx(
+              exportData,
+              `corrosion_review_${new Date().toISOString().slice(0, 10)}.xlsx`,
+            )
+          }
         />
         <FormatCard
           icon={<Printer className="h-5 w-5" />}
@@ -239,7 +344,9 @@ function FormatCard({
 function Stat({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">{label}</div>
+      <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+        {label}
+      </div>
       <div className="text-3xl font-serif italic mt-0.5">{value}</div>
     </div>
   );

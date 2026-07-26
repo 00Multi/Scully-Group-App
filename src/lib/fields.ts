@@ -102,8 +102,7 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     label: "Branch",
     group: "physical",
     type: "select",
-    definition:
-      "Did the IGC branch off into two or more grain boundaries at one node? (y/n)",
+    definition: "Did the IGC branch off into two or more grain boundaries at one node? (y/n)",
     options: ["y", "n"],
   },
   // Chemical
@@ -128,7 +127,8 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     label: "Impurities",
     group: "chemical",
     type: "text",
-    definition: "Reported salt impurities (oxygen, moisture, HF, metal cations, etc.) with concentration if given.",
+    definition:
+      "Reported salt impurities (oxygen, moisture, HF, metal cations, etc.) with concentration if given.",
   },
   {
     key: "crucible",
@@ -137,6 +137,15 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     type: "select",
     definition: "Container material holding the salt during the test.",
     options: ["Ni", "Graphite", "Alumina", "Quartz", "SS316", "Glassy carbon", "Mo"],
+  },
+  {
+    key: "test_type",
+    label: "Test type",
+    group: "chemical",
+    type: "select",
+    definition:
+      "Type of corrosion test: static immersion, potentiostatic (potential-controlled), or flowing salt.",
+    options: ["Static", "Potentiostatic", "Flowing"],
   },
   // Chemical — electrochemical conditions (carried over from the spreadsheet's
   // "Electrochemical Conditions" column).
@@ -162,15 +171,29 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     key: "alloy",
     label: "Alloy",
     group: "material",
-    type: "text",
-    definition: "Alloy tested, ideally by common designation (e.g. Inconel 625, Hastelloy N, Ni-20Cr).",
+    type: "select",
+    definition:
+      "Alloy tested, ideally by common designation (e.g. Inconel 625, Hastelloy N, Ni-20Cr).",
+    options: [
+      "Inconel 625",
+      "Inconel 718",
+      "Hastelloy N",
+      "Hastelloy C-276",
+      "Ni-20Cr",
+      "Ni-Cr binary",
+      "SS316",
+      "SS304",
+      "Incoloy 800H",
+      "Pure Ni",
+    ],
   },
   {
     key: "morphology",
     label: "Morphology",
     group: "material",
     type: "text",
-    definition: "Reported morphology of the attack (uniform, intergranular, pitting, subsurface voids, etc.).",
+    definition:
+      "Reported morphology of the attack (uniform, intergranular, pitting, subsurface voids, etc.).",
   },
   {
     key: "grain_size_um",
@@ -192,14 +215,16 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     label: "Fabrication",
     group: "material",
     type: "text",
-    definition: "Fabrication route of the sample (wrought, cast, additively manufactured, rolled, etc.).",
+    definition:
+      "Fabrication route of the sample (wrought, cast, additively manufactured, rolled, etc.).",
   },
   {
     key: "polish",
     label: "Polish",
     group: "material",
     type: "text",
-    definition: "Surface preparation before the test (final grit, electropolish, as-received, etc.).",
+    definition:
+      "Surface preparation before the test (final grit, electropolish, as-received, etc.).",
   },
 ];
 

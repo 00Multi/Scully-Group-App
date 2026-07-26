@@ -1,6 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Bar as RBar,
+  BarChart,
+  Cell,
+  ResponsiveContainer,
+  Tooltip as RTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useCategories, usePapers, useExperiments } from "@/lib/db";
+import type { Experiment } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
@@ -67,10 +77,11 @@ function Dashboard() {
   }, [categories, papers, experiments]);
 
   const worstFields = useMemo(() => {
-    return fieldDefs.map((f) => {
-      const s = stats.perField.get(f.key)!;
-      return { field: f, pct: s.total ? s.filled / s.total : 0, ...s };
-    })
+    return fieldDefs
+      .map((f) => {
+        const s = stats.perField.get(f.key)!;
+        return { field: f, pct: s.total ? s.filled / s.total : 0, ...s };
+      })
       .sort((a, b) => a.pct - b.pct)
       .slice(0, 6);
   }, [stats, fieldDefs]);
@@ -87,9 +98,39 @@ function Dashboard() {
       .slice(0, 10);
   }, [experiments, papers, fieldDefs]);
 
-  const overallPct = stats.totalCells
-    ? Math.round((stats.filled / stats.totalCells) * 100)
-    : 0;
+  const overallPct = stats.totalCells ? Math.round((stats.filled / stats.totalCells) * 100) : 0;
+
+  const papersPerYear = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const p of papers) if (p.year != null) m.set(p.year, (m.get(p.year) ?? 0) + 1);
+    return Array.from(m.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([year, count]) => ({ label: String(year), count }));
+  }, [papers]);
+
+  const saltDist = useMemo(() => categoricalDistribution(experiments, "salt"), [experiments]);
+  const crucibleDist = useMemo(
+    () => categoricalDistribution(experiments, "crucible"),
+    [experiments],
+  );
+  const testTypeDist = useMemo(
+    () => categoricalDistribution(experiments, "test_type"),
+    [experiments],
+  );
+  const tempHist = useMemo(() => temperatureHistogram(experiments), [experiments]);
+
+  const hasTrendData =
+    papersPerYear.length +
+      saltDist.length +
+      crucibleDist.length +
+      testTypeDist.length +
+      tempHist.length >
+    0;
+
+  // recharts needs a real width; render charts only after mount to avoid
+  // SSR/hydration width mismatches.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   return (
     <div className="max-w-[1600px] mx-auto px-6 py-8">
@@ -126,8 +167,18 @@ function Dashboard() {
 
         <Panel title="Field state totals" className="lg:col-span-1">
           <div className="space-y-3">
-            <Bar label="Filled" value={stats.filled} total={stats.totalCells} barClass="bg-state-filled" />
-            <Bar label="Missing" value={stats.missing} total={stats.totalCells} barClass="bg-state-missing" />
+            <Bar
+              label="Filled"
+              value={stats.filled}
+              total={stats.totalCells}
+              barClass="bg-state-filled"
+            />
+            <Bar
+              label="Missing"
+              value={stats.missing}
+              total={stats.totalCells}
+              barClass="bg-state-missing"
+            />
             <Bar label="N/A" value={stats.na} total={stats.totalCells} barClass="bg-state-na" />
             <Bar
               label="Needs check"
@@ -162,6 +213,19 @@ function Dashboard() {
           </ul>
         </Panel>
       </section>
+
+      {hasTrendData && (
+        <section className="mb-10">
+          <h2 className="text-2xl font-serif italic mb-3">Trends</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <TrendChart title="Papers per year" data={papersPerYear} mounted={mounted} />
+            <TrendChart title="Test temperature (°C)" data={tempHist} mounted={mounted} />
+            <TrendChart title="Salts" data={saltDist} mounted={mounted} />
+            <TrendChart title="Crucibles" data={crucibleDist} mounted={mounted} />
+            <TrendChart title="Test types" data={testTypeDist} mounted={mounted} />
+          </div>
+        </section>
+      )}
 
       <section className="mb-10">
         <div className="flex items-baseline justify-between mb-3">
@@ -200,6 +264,7 @@ function Dashboard() {
                   </div>
                   <Link
                     to="/browse"
+                    search={{ paper: paper!.id, exp: exp.id }}
                     className="text-xs text-copper hover:underline shrink-0 font-mono"
                   >
                     Edit →
@@ -237,13 +302,17 @@ function SchemaManager() {
         <div>
           <h2 className="text-2xl font-serif italic">Columns &amp; data points</h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-            Rename or add columns, and add, edit, or delete the data points inside each one.
-            Changes apply to every experiment and are saved automatically in this browser.
+            Rename or add columns, and add, edit, or delete the data points inside each one. Changes
+            apply to every experiment and are saved automatically in this browser.
           </p>
         </div>
         <button
           onClick={() => {
-            if (confirm("Reset all columns and data points to the defaults? Field values already entered are kept, but any columns or data points you added will be removed."))
+            if (
+              confirm(
+                "Reset all columns and data points to the defaults? Field values already entered are kept, but any columns or data points you added will be removed.",
+              )
+            )
               resetSchema();
           }}
           className="text-xs text-muted-foreground hover:text-destructive inline-flex items-center gap-1 shrink-0"
@@ -386,7 +455,114 @@ function SchemaManager() {
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: boolean }) {
+interface Bucket {
+  label: string;
+  count: number;
+}
+
+// Count filled/needs-check values of a field across experiments, grouping the
+// long tail into "Other" so the chart stays legible.
+function categoricalDistribution(experiments: Experiment[], key: string): Bucket[] {
+  const m = new Map<string, number>();
+  for (const e of experiments) {
+    const v = e.values?.[key];
+    if (!v || (v.state !== "filled" && v.state !== "needs_check")) continue;
+    if (v.value == null || String(v.value).trim() === "") continue;
+    const label = String(v.value).trim();
+    m.set(label, (m.get(label) ?? 0) + 1);
+  }
+  const sorted = Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, 8).map(([label, count]) => ({ label, count }));
+  const rest = sorted.slice(8).reduce((s, [, c]) => s + c, 0);
+  if (rest > 0) top.push({ label: "Other", count: rest });
+  return top;
+}
+
+function temperatureHistogram(experiments: Experiment[]): Bucket[] {
+  const temps: number[] = [];
+  for (const e of experiments) {
+    const v = e.values?.["temp_c"];
+    if (!v || v.state !== "filled") continue;
+    const n = typeof v.value === "number" ? v.value : Number(v.value);
+    if (Number.isFinite(n)) temps.push(n);
+  }
+  if (temps.length === 0) return [];
+  const size = 100; // °C bins
+  const m = new Map<number, number>();
+  for (const t of temps) {
+    const bin = Math.floor(t / size) * size;
+    m.set(bin, (m.get(bin) ?? 0) + 1);
+  }
+  return Array.from(m.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([bin, count]) => ({ label: `${bin}–${bin + size}`, count }));
+}
+
+const CHART_COLORS = [
+  "#b87333", // copper
+  "#8c9db5",
+  "#6b8f71",
+  "#c2a36b",
+  "#9a7aa0",
+  "#7a9bb0",
+  "#b0846b",
+  "#7f8ca3",
+  "#a0a0a0",
+];
+
+function TrendChart({ title, data, mounted }: { title: string; data: Bucket[]; mounted: boolean }) {
+  if (data.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-rule bg-card p-4">
+      <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-3">{title}</h3>
+      <div style={{ width: "100%", height: 180 }}>
+        {mounted && (
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={data} margin={{ top: 4, right: 8, left: -18, bottom: 4 }}>
+              <XAxis
+                dataKey="label"
+                tick={{ fontSize: 10, fill: "currentColor" }}
+                interval={0}
+                angle={data.length > 5 ? -30 : 0}
+                textAnchor={data.length > 5 ? "end" : "middle"}
+                height={data.length > 5 ? 46 : 20}
+                stroke="currentColor"
+                className="text-muted-foreground"
+              />
+              <YAxis
+                allowDecimals={false}
+                tick={{ fontSize: 10, fill: "currentColor" }}
+                stroke="currentColor"
+                className="text-muted-foreground"
+                width={28}
+              />
+              <RTooltip
+                cursor={{ fill: "rgba(184,115,51,0.08)" }}
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                labelStyle={{ fontWeight: 600 }}
+              />
+              <RBar dataKey="count" radius={[3, 3, 0, 0]}>
+                {data.map((_, i) => (
+                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                ))}
+              </RBar>
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string | number;
+  accent?: boolean;
+}) {
   return (
     <div className="rounded-lg border border-rule bg-card px-4 py-3">
       <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
@@ -414,9 +590,7 @@ function Panel({
 }) {
   return (
     <div className={"rounded-lg border border-rule bg-card p-4 " + className}>
-      <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-3">
-        {title}
-      </h3>
+      <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-3">{title}</h3>
       {children}
     </div>
   );

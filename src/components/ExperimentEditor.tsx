@@ -1,10 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { Experiment, Paper } from "@/lib/db";
-import { useUpdateExperiment, useDeleteExperiment, useUpdatePaper } from "@/lib/db";
+import {
+  useUpdateExperiment,
+  useDeleteExperiment,
+  useUpdatePaper,
+  useCreateExperiment,
+} from "@/lib/db";
 import { MISSING_VALUE, withDefaults, type FieldValue } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { FieldRow } from "./FieldRow";
-import { Plus, Trash2 } from "lucide-react";
+import { Copy, Plus, Trash2 } from "lucide-react";
 
 function useDebouncedEffect(cb: () => void, deps: unknown[], delay = 400) {
   const first = useRef(true);
@@ -19,22 +24,15 @@ function useDebouncedEffect(cb: () => void, deps: unknown[], delay = 400) {
   }, deps);
 }
 
-export function ExperimentEditor({
-  paper,
-  experiment,
-}: {
-  paper: Paper;
-  experiment: Experiment;
-}) {
+export function ExperimentEditor({ paper, experiment }: { paper: Paper; experiment: Experiment }) {
   const updateExp = useUpdateExperiment();
   const deleteExp = useDeleteExperiment();
+  const createExp = useCreateExperiment();
   const updatePaper = useUpdatePaper();
   const { groups, fieldsByGroup, addField, deleteField } = useSettings();
 
   const [label, setLabel] = useState(experiment.label);
-  const [values, setValues] = useState<Record<string, FieldValue>>(
-    withDefaults(experiment.values),
-  );
+  const [values, setValues] = useState<Record<string, FieldValue>>(withDefaults(experiment.values));
 
   useEffect(() => {
     setLabel(experiment.label);
@@ -63,8 +61,21 @@ export function ExperimentEditor({
     setValues((v) => ({ ...v, [key]: next }));
   };
 
+  const duplicate = () => {
+    createExp.mutate({
+      paper_id: experiment.paper_id,
+      label: `${experiment.label || "Experiment"} (copy)`,
+      position: experiment.position + 1,
+      values: withDefaults(experiment.values),
+    });
+  };
+
   return (
-    <div className="@container rounded-lg border border-rule bg-card">
+    <div
+      id={`exp-${experiment.id}`}
+      data-experiment-id={experiment.id}
+      className="@container rounded-lg border border-rule bg-card scroll-mt-20 target:ring-2 target:ring-copper"
+    >
       <header className="flex items-center justify-between gap-2 px-5 py-3 border-b border-rule">
         <div className="flex items-center gap-3 flex-1 min-w-0">
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
@@ -77,6 +88,15 @@ export function ExperimentEditor({
             className="flex-1 bg-transparent text-lg font-serif italic focus:outline-none min-w-0"
           />
         </div>
+        <button
+          onClick={duplicate}
+          disabled={createExp.isPending}
+          className="text-muted-foreground hover:text-copper transition-colors p-1 disabled:opacity-50"
+          aria-label="Duplicate experiment"
+          title="Duplicate this experiment row (reuses its values)"
+        >
+          <Copy className="h-4 w-4" />
+        </button>
         <button
           onClick={() => {
             if (confirm("Delete this experiment row?")) deleteExp.mutate(experiment.id);

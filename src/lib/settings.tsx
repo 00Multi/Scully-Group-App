@@ -35,6 +35,9 @@ interface SettingsCtx {
 
   // Data points (fields)
   addField: (groupId: string, input?: NewFieldInput) => string;
+  // Merge fully-formed fields (used by the importer) keeping their keys;
+  // fields whose key or group already exists are skipped / their group ensured.
+  addImportedFields: (fields: FieldDef[]) => void;
   updateField: (key: string, patch: Partial<FieldDef>) => void;
   deleteField: (key: string) => void;
 
@@ -71,7 +74,10 @@ function uniqueKey(base: string, taken: Set<string>): string {
 function cloneDefaultSchema(): Schema {
   return {
     groups: DEFAULT_SCHEMA.groups.map((g) => ({ ...g })),
-    fields: DEFAULT_SCHEMA.fields.map((f) => ({ ...f, options: f.options ? [...f.options] : undefined })),
+    fields: DEFAULT_SCHEMA.fields.map((f) => ({
+      ...f,
+      options: f.options ? [...f.options] : undefined,
+    })),
   };
 }
 
@@ -149,6 +155,24 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       return newKey;
     };
 
+    const addImportedFields: SettingsCtx["addImportedFields"] = (incoming) => {
+      if (!incoming.length) return;
+      setSchema((prev) => {
+        const haveKeys = new Set(prev.fields.map((f) => f.key));
+        const haveGroups = new Set(prev.groups.map((g) => g.id));
+        const toAdd = incoming.filter((f) => !haveKeys.has(f.key));
+        if (toAdd.length === 0) return prev;
+        // Make sure each new field's group exists as a column.
+        const missingGroups = Array.from(new Set(toAdd.map((f) => f.group)))
+          .filter((g) => !haveGroups.has(g))
+          .map((g) => ({ id: g, label: g.charAt(0).toUpperCase() + g.slice(1) }));
+        return {
+          groups: [...prev.groups, ...missingGroups],
+          fields: [...prev.fields, ...toAdd],
+        };
+      });
+    };
+
     const updateField: SettingsCtx["updateField"] = (key, patch) => {
       setSchema((prev) => ({
         ...prev,
@@ -201,6 +225,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       fieldDefs,
       fieldsByGroup: byGroup,
       addField,
+      addImportedFields,
       updateField,
       deleteField,
       addGroup,
