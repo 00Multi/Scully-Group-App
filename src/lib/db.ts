@@ -459,3 +459,50 @@ export function useImportData() {
     },
   });
 }
+
+// Recursively collect every object path in the `papers` storage bucket.
+async function listAllStoragePaths(prefix = ""): Promise<string[]> {
+  const { data, error } = await supabase.storage.from("papers").list(prefix, { limit: 1000 });
+  if (error || !data) return [];
+  const out: string[] = [];
+  for (const entry of data) {
+    const full = prefix ? `${prefix}/${entry.name}` : entry.name;
+    // Folders come back with a null id; recurse into them.
+    if ((entry as { id: string | null }).id === null) {
+      out.push(...(await listAllStoragePaths(full)));
+    } else {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+// Permanently delete ALL content: every paper (experiments cascade), and every
+// uploaded PDF/image in storage. Categories and the column/data-point schema
+// are configuration, not data, so they are left intact.
+export function useResetAllData() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<{ papers: number; files: number }> => {
+      const { count } = await supabase.from("papers").select("*", { count: "exact", head: true });
+
+      // 1. Remove all stored files (PDFs + images) in batches.
+      const paths = await listAllStoragePaths("");
+      for (let i = 0; i < paths.length; i += 100) {
+        const chunk = paths.slice(i, i + 100);
+        const { error } = await supabase.storage.from("papers").remove(chunk);
+        if (error) throw error;
+      }
+
+      // 2. Delete all papers; experiments are removed via ON DELETE CASCADE.
+      const { error: pErr } = await supabase.from("papers").delete().not("id", "is", null);
+      if (pErr) throw pErr;
+
+      return { papers: count ?? 0, files: paths.length };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["papers"] });
+      qc.invalidateQueries({ queryKey: ["experiments"] });
+    },
+  });
+}
