@@ -4,8 +4,8 @@ import { useCategories, usePapers, useExperiments } from "@/lib/db";
 import type { Experiment } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
-import { downloadXlsx, openPrintReport, type ExportData } from "@/lib/xlsx-export";
-import { Braces, FileJson, FileSpreadsheet, Printer, Search } from "lucide-react";
+import { buildCsv, downloadXlsx, openPrintReport, type ExportData } from "@/lib/xlsx-export";
+import { Braces, FileJson, FileSpreadsheet, Printer, Search, Table } from "lucide-react";
 
 type StateFilter = "any" | FieldState;
 
@@ -184,6 +184,7 @@ function ExportPage() {
   };
   const downloadJsonl = () => downloadBlob(jsonl, "application/x-ndjson", "jsonl");
   const downloadJson = () => downloadBlob(jsonDoc, "application/json", "json");
+  const downloadCsv = () => downloadBlob(buildCsv(exportData), "text/csv", "csv");
 
   const recordCount = filteredExps.length;
 
@@ -191,10 +192,10 @@ function ExportPage() {
     <div className="max-w-4xl mx-auto px-6 py-10">
       <h1 className="text-5xl font-serif italic">Export</h1>
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
-        Machine-readable <strong>JSONL</strong> or <strong>JSON</strong> for AI training, a
-        human-readable <strong>XLSX</strong> reproducing the four column groups, and a printable{" "}
-        <strong>PDF report</strong> grouped by material category. All formats respect the filter
-        below — category, search, and field state.
+        Machine-readable <strong>JSONL</strong>, <strong>JSON</strong>, or <strong>CSV</strong> for
+        AI training and reuse, a human-readable <strong>XLSX</strong> reproducing the four column
+        groups, and a printable <strong>PDF report</strong> grouped by material category. All
+        formats respect the filter below — category, search, and field state.
       </p>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-4">
@@ -252,13 +253,20 @@ function ExportPage() {
         </p>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <FormatCard
           icon={<FileJson className="h-5 w-5" />}
           title="JSONL"
           desc="One record per experiment, typed, with explicit states and a schema header line."
           action="Download .jsonl"
           onClick={downloadJsonl}
+        />
+        <FormatCard
+          icon={<Table className="h-5 w-5" />}
+          title="CSV"
+          desc="Flat one-row-per-experiment table with paper columns — opens anywhere, re-imports here."
+          action="Download .csv"
+          onClick={downloadCsv}
         />
         <FormatCard
           icon={<Braces className="h-5 w-5" />}

@@ -89,6 +89,51 @@ export function downloadXlsx(data: ExportData, filename: string) {
   XLSX.writeFile(wb, filename);
 }
 
+// ---------- CSV (flat, one row per experiment; round-trips the importer) ----------
+
+function csvCell(s: unknown): string {
+  const t = String(s ?? "");
+  return /[",\r\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+}
+
+export function buildCsv(data: ExportData): string {
+  const catById = new Map(data.categories.map((c) => [c.id, c.name]));
+  const paperById = new Map(data.papers.map((p) => [p.id, p]));
+  const orderedFields = data.groups.flatMap((g) => data.fields.filter((f) => f.group === g.id));
+
+  const header = [
+    "Author",
+    "Year",
+    "Category",
+    "Title",
+    "DOI",
+    "Journal",
+    "Experiment",
+    ...orderedFields.map(fieldHeader),
+    "Summary",
+    "Notes",
+  ];
+  const lines = [header.map(csvCell).join(",")];
+  for (const exp of data.experiments) {
+    const p = paperById.get(exp.paper_id);
+    if (!p) continue;
+    const row: unknown[] = [
+      p.author,
+      p.year ?? "",
+      (p.category_id && catById.get(p.category_id)) || "",
+      p.title,
+      p.doi,
+      p.journal ?? "",
+      exp.label,
+      ...orderedFields.map((f) => displayValue(exp.values?.[f.key])),
+      p.summary ?? "",
+      p.notes ?? "",
+    ];
+    lines.push(row.map(csvCell).join(","));
+  }
+  return lines.join("\r\n");
+}
+
 // ---------- Printable PDF report ----------
 
 function esc(s: unknown): string {
@@ -104,10 +149,7 @@ export function buildReportHtml(data: ExportData): string {
   }
   const orderedFields = data.groups.flatMap((g) => data.fields.filter((f) => f.group === g.id));
 
-  const cats = [
-    ...data.categories,
-    { id: "__uncat__", name: "Uncategorized", sort_order: 9999 },
-  ];
+  const cats = [...data.categories, { id: "__uncat__", name: "Uncategorized", sort_order: 9999 }];
 
   let body = "";
   for (const cat of cats) {
@@ -128,7 +170,15 @@ export function buildReportHtml(data: ExportData): string {
           const fs = orderedFields.filter((f) => f.group === g.id);
           const cells = fs
             .map((f) => {
-              const v = displayValue(e.values?.[f.key]);
+              const fv = e.values?.[f.key];
+              if (f.type === "image") {
+                const src =
+                  fv && fv.state === "filled" && typeof fv.value === "string" ? fv.value : "";
+                return src
+                  ? `<tr><th>${esc(f.label)}</th><td><img src="${esc(src)}" style="max-height:200px;max-width:100%"/></td></tr>`
+                  : "";
+              }
+              const v = displayValue(fv);
               return v ? `<tr><th>${esc(f.label)}</th><td>${esc(v)}</td></tr>` : "";
             })
             .join("");

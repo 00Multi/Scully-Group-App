@@ -13,7 +13,7 @@
 // are logged. See PRD §6 — ~90% automatic, 10% manual cleanup.
 
 import * as XLSX from "xlsx";
-import type { FieldDef, FieldValue } from "./fields";
+import type { FieldDef, FieldState, FieldValue } from "./fields";
 import type { ImportPaperInput } from "./db";
 
 export interface ImportResult {
@@ -26,7 +26,7 @@ export interface ImportResult {
 
 // Fields whose cell may pack several conditions ("static vs flowing",
 // "Ni / graphite") that should become separate experiment rows.
-const SPLITTABLE_KEYS = ["flow_static", "test_type", "crucible", "atmosphere"];
+const SPLITTABLE_KEYS = ["flow_static", "crucible", "atmosphere"];
 // Cap the combinations from one row so a messy cell can't explode into dozens
 // of experiments; beyond this we keep a single row and log it.
 const MAX_SPLIT_ROWS = 8;
@@ -75,8 +75,6 @@ const SYNONYMS: Record<string, string> = {
   impur: "impurities",
   impurities: "impurities",
   crucible: "crucible",
-  testtype: "test_type",
-  test: "test_type",
   mcep: "mcep",
   ptlpol: "ptl_pol",
   alloy: "alloy",
@@ -361,4 +359,319 @@ export async function parseWorkbook(file: File, fields: FieldDef[]): Promise<Imp
     `Parsed ${papers.length} paper row${papers.length === 1 ? "" : "s"} from "${file.name}".`,
   );
   return { papers, newFields, log };
+}
+
+// ---------- CSV / JSON / JSONL import ----------
+//
+// These read the app's own export shapes (so exports round-trip), plus generic
+// flat CSVs. A CSV is one row per experiment with paper columns + one column
+// per data point. JSON is a { schema, records } document; JSONL is a schema
+// header line followed by one record object per line.
+
+function asObj(x: unknown): Record<string, unknown> {
+  return x && typeof x === "object" ? (x as Record<string, unknown>) : {};
+}
+function asStr(x: unknown): string {
+  return x == null ? "" : String(x);
+}
+function asNum(x: unknown): number | null {
+  if (x == null || x === "") return null;
+  const n = typeof x === "number" ? x : Number(x);
+  return Number.isFinite(n) ? n : null;
+}
+function asState(x: unknown): FieldState {
+  return x === "filled" || x === "missing" || x === "na" || x === "needs_check" ? x : "filled";
+}
+
+// Minimal RFC-4180 CSV parser: handles quoted fields, escaped quotes, and CRLF.
+function parseCsvText(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else inQuotes = false;
+      } else cur += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ",") {
+      row.push(cur);
+      cur = "";
+    } else if (ch === "\r") {
+      /* ignore */
+    } else if (ch === "\n") {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = "";
+    } else cur += ch;
+  }
+  if (cur !== "" || row.length) {
+    row.push(cur);
+    rows.push(row);
+  }
+  return rows;
+}
+
+// Normalized CSV header names that map to paper-level columns.
+const PAPER_COL: Record<string, string> = {
+  author: "author",
+  year: "year",
+  category: "category",
+  materialcategory: "category",
+  title: "title",
+  doi: "doi",
+  journal: "journal",
+  experiment: "experiment",
+  label: "experiment",
+  summary: "summary",
+  notes: "notes",
+};
+
+function parseCsv(text: string, fileName: string, fields: FieldDef[]): ImportResult {
+  const rows = parseCsvText(text).filter((r) => r.some((c) => c.trim() !== ""));
+  const log: string[] = [];
+  const newFields: FieldDef[] = [];
+  if (rows.length < 2) {
+    return { papers: [], newFields, log: [`No data rows found in "${fileName}".`] };
+  }
+  const header = rows[0].map((h) => h.trim());
+  const labelMap = buildLabelMap(fields);
+  const takenKeys = new Set(fields.map((f) => f.key));
+
+  type Col = { kind: "paper"; key: string } | { kind: "field"; field: FieldDef } | { kind: "skip" };
+  const cols: Col[] = header.map((h) => {
+    const n = norm(h);
+    if (PAPER_COL[n]) return { kind: "paper", key: PAPER_COL[n] };
+    if (!n) return { kind: "skip" };
+    let f = labelMap.get(n);
+    if (!f) {
+      let key = slugify(h) || "field";
+      let i = 2;
+      while (takenKeys.has(key)) key = `${slugify(h) || "field"}_${i++}`;
+      takenKeys.add(key);
+      f = {
+        key,
+        label: h,
+        group: "physical",
+        type: "text",
+        definition: `Imported from CSV column "${h}".`,
+      };
+      newFields.push(f);
+      labelMap.set(n, f);
+    }
+    return { kind: "field", field: f };
+  });
+
+  const paperIdx = (key: string) => cols.findIndex((c) => c.kind === "paper" && c.key === key);
+  const idx = {
+    author: paperIdx("author"),
+    year: paperIdx("year"),
+    category: paperIdx("category"),
+    title: paperIdx("title"),
+    doi: paperIdx("doi"),
+    notes: paperIdx("notes"),
+    summary: paperIdx("summary"),
+    experiment: paperIdx("experiment"),
+  };
+  const cell = (row: string[], i: number) => (i >= 0 ? (row[i] ?? "").trim() : "");
+
+  const byPaper = new Map<string, ImportPaperInput>();
+  const order: string[] = [];
+  let expCount = 0;
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const author = cell(row, idx.author);
+    const title = cell(row, idx.title);
+    if (!author && !title) continue;
+    const year = asNum(cell(row, idx.year));
+    const category = cell(row, idx.category) || null;
+    const pk = `${author}|${year ?? ""}|${title}|${category ?? ""}`;
+    let paper = byPaper.get(pk);
+    if (!paper) {
+      paper = {
+        category_name: category,
+        author,
+        year,
+        title,
+        doi: cell(row, idx.doi),
+        notes: cell(row, idx.notes),
+        summary: cell(row, idx.summary),
+        experiments: [],
+      };
+      byPaper.set(pk, paper);
+      order.push(pk);
+    }
+    const values: Record<string, FieldValue> = {};
+    cols.forEach((c, i) => {
+      if (c.kind !== "field") return;
+      const raw = (row[i] ?? "").trim();
+      if (raw !== "") values[c.field.key] = toFieldValue(raw, c.field.type);
+    });
+    const label = cell(row, idx.experiment) || `Experiment ${paper.experiments.length + 1}`;
+    paper.experiments.push({ label, values });
+    expCount++;
+  }
+
+  const papers = order.map((k) => byPaper.get(k)!);
+  log.push(
+    `Parsed ${papers.length} paper(s) and ${expCount} experiment row(s) from CSV "${fileName}".`,
+  );
+  if (newFields.length) {
+    log.push(
+      `Created ${newFields.length} new data point(s) from unmatched columns: ${newFields.map((f) => f.label).join(", ")}.`,
+    );
+  }
+  return { papers, newFields, log };
+}
+
+function parseJson(text: string, fileName: string, fields: FieldDef[]): ImportResult {
+  const log: string[] = [];
+  const newFields: FieldDef[] = [];
+  const trimmed = text.trim();
+
+  let records: unknown[] = [];
+  let schemaFields: unknown[] | null = null;
+
+  let parsedWhole: unknown;
+  try {
+    parsedWhole = JSON.parse(trimmed);
+  } catch {
+    parsedWhole = undefined;
+  }
+  if (parsedWhole !== undefined) {
+    if (Array.isArray(parsedWhole)) records = parsedWhole;
+    else {
+      const o = asObj(parsedWhole);
+      records = Array.isArray(o.records) ? (o.records as unknown[]) : [];
+      const sf = asObj(o.schema).fields;
+      if (Array.isArray(sf)) schemaFields = sf;
+    }
+  } else {
+    // JSONL: one JSON object per line; a $meta:"schema" line is the header.
+    for (const line of trimmed.split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      let obj: unknown;
+      try {
+        obj = JSON.parse(t);
+      } catch {
+        continue;
+      }
+      const o = asObj(obj);
+      if (o.$meta === "schema") {
+        if (Array.isArray(o.fields)) schemaFields = o.fields as unknown[];
+        continue;
+      }
+      records.push(obj);
+    }
+  }
+
+  const takenKeys = new Set(fields.map((f) => f.key));
+  const registerField = (key: string, def: Record<string, unknown>) => {
+    if (takenKeys.has(key)) return;
+    takenKeys.add(key);
+    const type = def.type;
+    const validType =
+      type === "number" || type === "select" || type === "image"
+        ? type
+        : ("text" as FieldDef["type"]);
+    const f: FieldDef = {
+      key,
+      label: asStr(def.label) || key,
+      group: asStr(def.group) || "physical",
+      type: validType,
+      definition: asStr(def.definition),
+      ...(def.unit ? { unit: asStr(def.unit) } : {}),
+      ...(Array.isArray(def.options) && def.options.length
+        ? { options: (def.options as unknown[]).map(asStr) }
+        : {}),
+    };
+    newFields.push(f);
+  };
+  if (schemaFields) {
+    for (const sf of schemaFields) {
+      const o = asObj(sf);
+      if (o.key) registerField(asStr(o.key), o);
+    }
+  }
+
+  const byPaper = new Map<string, ImportPaperInput>();
+  const order: string[] = [];
+  let expCount = 0;
+  for (const rec of records) {
+    const o = asObj(rec);
+    const p = asObj(o.paper);
+    const author = asStr(p.author);
+    const title = asStr(p.title);
+    const year = asNum(p.year);
+    const pk = asStr(p.citation_key || p.id) || `${author}|${year ?? ""}|${title}`;
+    let paper = byPaper.get(pk);
+    if (!paper) {
+      paper = {
+        category_name: (p.material_category as string) ?? null,
+        author,
+        year,
+        title,
+        doi: asStr(p.doi),
+        notes: asStr(p.notes),
+        summary: asStr(p.summary || p.abstract),
+        experiments: [],
+      };
+      byPaper.set(pk, paper);
+      order.push(pk);
+    }
+    const values: Record<string, FieldValue> = {};
+    const flds = asObj(o.fields);
+    for (const [key, raw] of Object.entries(flds)) {
+      if (!takenKeys.has(key)) registerField(key, { label: key });
+      if (raw && typeof raw === "object" && "state" in (raw as object)) {
+        const ro = asObj(raw);
+        const state = asState(ro.state);
+        const fv: FieldValue = {
+          value: (ro.value as string | number | null) ?? null,
+          state,
+        };
+        if (ro.note) fv.note = asStr(ro.note);
+        values[key] = fv;
+      } else {
+        values[key] = toFieldValue(asStr(raw), "text");
+      }
+    }
+    paper.experiments.push({
+      label: asStr(o.label) || `Experiment ${paper.experiments.length + 1}`,
+      values,
+    });
+    expCount++;
+  }
+  for (const paper of byPaper.values()) {
+    if (paper.experiments.length === 0)
+      paper.experiments.push({ label: "Experiment 1", values: {} });
+  }
+
+  const papers = order.map((k) => byPaper.get(k)!);
+  log.push(`Parsed ${papers.length} paper(s) and ${expCount} experiment(s) from "${fileName}".`);
+  if (newFields.length) {
+    log.push(`Registered ${newFields.length} data point(s) from the file's schema/fields.`);
+  }
+  if (!records.length) {
+    log.push("No experiment records found — expected the app's JSON/JSONL export shape.");
+  }
+  return { papers, newFields, log };
+}
+
+// Entry point: dispatch by file extension. Supports .xlsx/.xls, .csv, .json,
+// and .jsonl/.ndjson.
+export async function parseImportFile(file: File, fields: FieldDef[]): Promise<ImportResult> {
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv")) return parseCsv(await file.text(), file.name, fields);
+  if (name.endsWith(".jsonl") || name.endsWith(".ndjson") || name.endsWith(".json")) {
+    return parseJson(await file.text(), file.name, fields);
+  }
+  return parseWorkbook(file, fields);
 }
