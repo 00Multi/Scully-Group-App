@@ -293,6 +293,48 @@ function Dashboard() {
   );
 }
 
+// Comma-separated dropdown-options editor. Keeps its own text state while the
+// user is typing so a comma (needed to separate options) is never eaten by the
+// parse-on-every-keystroke; it only commits the parsed list on blur, and
+// re-seeds from props when not focused (e.g. after a schema reset).
+function OptionsInput({
+  value,
+  onCommit,
+}: {
+  value: string[];
+  onCommit: (options: string[]) => void;
+}) {
+  const [text, setText] = useState(value.join(", "));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setText(value.join(", "));
+  }, [value, focused]);
+
+  const commit = () =>
+    onCommit(
+      text
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+
+  return (
+    <input
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        commit();
+      }}
+      placeholder="Dropdown options, comma-separated (leave blank for a free-text field)"
+      className="bg-muted/40 rounded px-2 py-1 text-xs font-mono focus:outline-none"
+      aria-label="Dropdown options"
+    />
+  );
+}
+
 function CategoryManager({ categories }: { categories: Category[] }) {
   const create = useCreateCategory();
   const update = useUpdateCategory();
@@ -497,19 +539,9 @@ function SchemaManager() {
                     className="bg-transparent border border-input rounded px-2 py-1 text-xs focus:border-primary focus:outline-none resize-y min-h-[2rem]"
                     aria-label="Definition"
                   />
-                  <input
-                    value={(f.options ?? []).join(", ")}
-                    onChange={(e) =>
-                      updateField(f.key, {
-                        options: e.target.value
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      })
-                    }
-                    placeholder="Dropdown options, comma-separated (leave blank for a free-text field)"
-                    className="bg-muted/40 rounded px-2 py-1 text-xs font-mono focus:outline-none"
-                    aria-label="Dropdown options"
+                  <OptionsInput
+                    value={f.options ?? []}
+                    onCommit={(options) => updateField(f.key, { options })}
                   />
                 </div>
                 <button
