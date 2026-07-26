@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import { useImportData, type ImportPaperInput } from "@/lib/db";
 import { useFieldDefs, useSettings } from "@/lib/settings";
-import { parseWorkbook, type ImportResult } from "@/lib/xlsx-import";
+import { parseImportFile, type ImportResult } from "@/lib/xlsx-import";
 import { FileSpreadsheet, Loader2, UploadCloud } from "lucide-react";
 
 export const Route = createFileRoute("/import")({
@@ -52,11 +52,13 @@ function ImportPage() {
     setParsed(null);
     setFileName(file.name);
     try {
-      const result = await parseWorkbook(file, fieldDefs);
+      const result = await parseImportFile(file, fieldDefs);
       setParsed(result);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Could not read that file. Is it an .xlsx workbook?",
+        err instanceof Error
+          ? err.message
+          : "Could not read that file. Supported: .xlsx, .csv, .json, .jsonl.",
       );
     } finally {
       setParsing(false);
@@ -80,20 +82,26 @@ function ImportPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
-      <h1 className="text-5xl font-serif italic">Import spreadsheet</h1>
+      <h1 className="text-5xl font-serif italic">Import data</h1>
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
-        Reads the existing corrosion-review workbook (.xlsx), maps each section header to a material
-        category, parses <span className="font-mono">Author Year</span> into papers, and splits the{" "}
-        <span className="font-mono">Label: value</span> group cells into typed fields. Cells that
-        describe several conditions (e.g. <span className="font-mono">static vs flowing</span>,{" "}
-        <span className="font-mono">Ni / graphite</span>) become separate experiment rows, and
-        labels not already in the schema are added as new data points (Missing everywhere else) —
-        nothing is silently dropped. The log lists every split, new field, and ambiguous cell for
-        review.
+        Import from <span className="font-mono">.xlsx</span>,{" "}
+        <span className="font-mono">.csv</span>, <span className="font-mono">.json</span>, or{" "}
+        <span className="font-mono">.jsonl</span>. The original review workbook maps section headers
+        to categories, parses <span className="font-mono">Author Year</span> into papers, and splits
+        multi-condition cells into separate experiments. CSV and JSON/JSONL round-trip the app's own
+        exports (one record per experiment). Labels not already in the schema are added as new data
+        points (Missing everywhere else) — nothing is silently dropped, and the log lists every
+        split, new field, and ambiguous cell.
       </p>
 
       <div className="mt-8 rounded-lg border border-rule bg-card p-5">
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={onPick} className="hidden" />
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv,.json,.jsonl,.ndjson"
+          onChange={onPick}
+          className="hidden"
+        />
         <button
           onClick={() => fileRef.current?.click()}
           disabled={parsing}
@@ -104,7 +112,7 @@ function ImportPage() {
           ) : (
             <UploadCloud className="h-4 w-4" />
           )}
-          Choose .xlsx file
+          Choose a file (.xlsx, .csv, .json, .jsonl)
         </button>
         {fileName && (
           <span className="ml-3 text-sm text-muted-foreground inline-flex items-center gap-1">

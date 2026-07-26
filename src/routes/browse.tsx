@@ -8,6 +8,7 @@ import { PdfViewer } from "@/components/PdfViewer";
 import { PdfDropZone } from "@/components/PdfDropZone";
 import { useCategories, usePapers, useExperiments } from "@/lib/db";
 import type { Paper } from "@/lib/db";
+import { SnipProvider } from "@/lib/snip";
 import { Columns2, FileText, Table2 } from "lucide-react";
 
 type ViewMode = "data" | "split" | "paper";
@@ -196,58 +197,36 @@ function BrowsePage() {
   }, [mode, selectedExpId, selectedId, selectedExps.length]);
 
   return (
-    <div className="flex max-w-[1600px] mx-auto">
-      <BrowseTree
-        categories={categories}
-        papers={papers}
-        experiments={experiments}
-        selectedPaperId={selectedId}
-        selectedExperimentId={selectedExpId}
-        onSelectPaper={(id) => {
-          setSelectedId(id);
-          setSelectedExpId(null);
-        }}
-        onSelectExperiment={selectExperiment}
-        search={search}
-        setSearch={setSearch}
-        stateFilter={stateFilter}
-        setStateFilter={setStateFilter}
-      />
-      <section className="flex-1 min-w-0 flex flex-col h-[calc(100vh-3.5rem)]">
-        {selected ? (
-          <>
-            <div className="flex items-center justify-between gap-3 px-6 py-2 border-b border-rule">
-              <span className="text-sm font-serif italic truncate">
-                {selected.citation_key || "Untitled"}
-              </span>
-              <ViewToggle mode={mode} setMode={chooseMode} />
-            </div>
-
-            {mode === "data" && (
-              <div className="flex-1 min-h-0">
-                <DataPane
-                  paper={selected}
-                  exps={selectedExps}
-                  onCreated={setSelectedId}
-                  scrollRef={attachDataScroll}
-                  onScroll={onDataScroll}
-                />
+    <SnipProvider>
+      <div className="flex max-w-[1600px] mx-auto">
+        <BrowseTree
+          categories={categories}
+          papers={papers}
+          experiments={experiments}
+          selectedPaperId={selectedId}
+          selectedExperimentId={selectedExpId}
+          onSelectPaper={(id) => {
+            setSelectedId(id);
+            setSelectedExpId(null);
+          }}
+          onSelectExperiment={selectExperiment}
+          search={search}
+          setSearch={setSearch}
+          stateFilter={stateFilter}
+          setStateFilter={setStateFilter}
+        />
+        <section className="flex-1 min-w-0 flex flex-col h-[calc(100vh-3.5rem)]">
+          {selected ? (
+            <>
+              <div className="flex items-center justify-between gap-3 px-6 py-2 border-b border-rule">
+                <span className="text-sm font-serif italic truncate">
+                  {selected.citation_key || "Untitled"}
+                </span>
+                <ViewToggle mode={mode} setMode={chooseMode} />
               </div>
-            )}
 
-            {mode === "paper" && (
-              <div className="flex-1 min-h-0">
-                <PdfViewer paper={selected} />
-              </div>
-            )}
-
-            {mode === "split" && (
-              <Group orientation="horizontal" className="flex-1 min-h-0 flex">
-                <Panel defaultSize="50%" minSize="25%" className="min-h-0">
-                  <PdfViewer paper={selected} />
-                </Panel>
-                <Separator className="w-1.5 bg-rule/40 hover:bg-copper/60 transition-colors cursor-col-resize" />
-                <Panel defaultSize="50%" minSize="25%" className="min-h-0">
+              {mode === "data" && (
+                <div className="flex-1 min-h-0">
                   <DataPane
                     paper={selected}
                     exps={selectedExps}
@@ -255,23 +234,47 @@ function BrowsePage() {
                     scrollRef={attachDataScroll}
                     onScroll={onDataScroll}
                   />
-                </Panel>
-              </Group>
-            )}
-          </>
-        ) : (
-          <div className="flex-1 overflow-y-auto p-6">
-            <div className="max-w-2xl mx-auto mt-10">
-              <h2 className="text-3xl font-serif italic text-center">Empty database</h2>
-              <p className="mt-2 mb-6 text-sm text-muted-foreground text-center">
-                Add a paper from the tree on the left, or drop PDFs below to create papers with
-                metadata auto-filled.
-              </p>
-              <PdfDropZone onCreated={setSelectedId} />
+                </div>
+              )}
+
+              {mode === "paper" && (
+                <div className="flex-1 min-h-0">
+                  <PdfViewer paper={selected} />
+                </div>
+              )}
+
+              {mode === "split" && (
+                <Group orientation="horizontal" className="flex-1 min-h-0 flex">
+                  <Panel defaultSize="50%" minSize="25%" className="min-h-0">
+                    <PdfViewer paper={selected} />
+                  </Panel>
+                  <Separator className="w-1.5 bg-rule/40 hover:bg-copper/60 transition-colors cursor-col-resize" />
+                  <Panel defaultSize="50%" minSize="25%" className="min-h-0">
+                    <DataPane
+                      paper={selected}
+                      exps={selectedExps}
+                      onCreated={setSelectedId}
+                      scrollRef={attachDataScroll}
+                      onScroll={onDataScroll}
+                    />
+                  </Panel>
+                </Group>
+              )}
+            </>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="max-w-2xl mx-auto mt-10">
+                <h2 className="text-3xl font-serif italic text-center">Empty database</h2>
+                <p className="mt-2 mb-6 text-sm text-muted-foreground text-center">
+                  Add a paper from the tree on the left, or drop PDFs below to create papers with
+                  metadata auto-filled.
+                </p>
+                <PdfDropZone onCreated={setSelectedId} />
+              </div>
             </div>
-          </div>
-        )}
-      </section>
-    </div>
+          )}
+        </section>
+      </div>
+    </SnipProvider>
   );
 }

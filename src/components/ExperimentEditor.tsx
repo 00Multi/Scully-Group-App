@@ -9,6 +9,7 @@ import {
 import { MISSING_VALUE, withDefaults, type FieldValue } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { FieldRow } from "./FieldRow";
+import { ImageFieldRow } from "./ImageFieldRow";
 import { Copy, Plus, Trash2 } from "lucide-react";
 
 function useDebouncedEffect(cb: () => void, deps: unknown[], delay = 400) {
@@ -115,22 +116,35 @@ export function ExperimentEditor({ paper, experiment }: { paper: Paper; experime
               {group.label}
             </h4>
             <div>
-              {(fieldsByGroup[group.id] ?? []).map((f) => (
-                <FieldRow
-                  key={f.key}
-                  field={f}
-                  value={values[f.key] ?? MISSING_VALUE}
-                  onChange={(next) => setField(f.key, next)}
-                  onDelete={() => {
-                    if (
-                      confirm(
-                        `Delete the "${f.label}" data point? It will be removed from every experiment.`,
-                      )
+              {(fieldsByGroup[group.id] ?? []).map((f) => {
+                const onDelete = () => {
+                  if (
+                    confirm(
+                      `Delete the "${f.label}" data point? It will be removed from every experiment.`,
                     )
-                      deleteField(f.key);
-                  }}
-                />
-              ))}
+                  )
+                    deleteField(f.key);
+                };
+                return f.type === "image" ? (
+                  <ImageFieldRow
+                    key={f.key}
+                    field={f}
+                    value={values[f.key] ?? MISSING_VALUE}
+                    paperId={paper.id}
+                    experimentId={experiment.id}
+                    onChange={(next) => setField(f.key, next)}
+                    onDelete={onDelete}
+                  />
+                ) : (
+                  <FieldRow
+                    key={f.key}
+                    field={f}
+                    value={values[f.key] ?? MISSING_VALUE}
+                    onChange={(next) => setField(f.key, next)}
+                    onDelete={onDelete}
+                  />
+                );
+              })}
               {(fieldsByGroup[group.id] ?? []).length === 0 && (
                 <p className="text-xs text-muted-foreground italic py-2">No data points yet.</p>
               )}

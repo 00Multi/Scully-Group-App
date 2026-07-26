@@ -9,8 +9,15 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { useCategories, usePapers, useExperiments } from "@/lib/db";
-import type { Experiment } from "@/lib/db";
+import {
+  useCategories,
+  usePapers,
+  useExperiments,
+  useCreateCategory,
+  useUpdateCategory,
+  useDeleteCategory,
+} from "@/lib/db";
+import type { Category, Experiment } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { Plus, RotateCcw, Trash2 } from "lucide-react";
@@ -113,8 +120,8 @@ function Dashboard() {
     () => categoricalDistribution(experiments, "crucible"),
     [experiments],
   );
-  const testTypeDist = useMemo(
-    () => categoricalDistribution(experiments, "test_type"),
+  const flowStaticDist = useMemo(
+    () => categoricalDistribution(experiments, "flow_static"),
     [experiments],
   );
   const tempHist = useMemo(() => temperatureHistogram(experiments), [experiments]);
@@ -123,7 +130,7 @@ function Dashboard() {
     papersPerYear.length +
       saltDist.length +
       crucibleDist.length +
-      testTypeDist.length +
+      flowStaticDist.length +
       tempHist.length >
     0;
 
@@ -222,7 +229,7 @@ function Dashboard() {
             <TrendChart title="Test temperature (°C)" data={tempHist} mounted={mounted} />
             <TrendChart title="Salts" data={saltDist} mounted={mounted} />
             <TrendChart title="Crucibles" data={crucibleDist} mounted={mounted} />
-            <TrendChart title="Test types" data={testTypeDist} mounted={mounted} />
+            <TrendChart title="Flowing / static" data={flowStaticDist} mounted={mounted} />
           </div>
         </section>
       )}
@@ -276,12 +283,99 @@ function Dashboard() {
         </div>
       </section>
 
+      <CategoryManager categories={categories} />
+
       <SchemaManager />
     </div>
   );
 }
 
-const FIELD_TYPES: FieldType[] = ["text", "number", "select"];
+function CategoryManager({ categories }: { categories: Category[] }) {
+  const create = useCreateCategory();
+  const update = useUpdateCategory();
+  const del = useDeleteCategory();
+  const [newName, setNewName] = useState("");
+  const [names, setNames] = useState<Record<string, string>>({});
+
+  const nameFor = (c: Category) => names[c.id] ?? c.name;
+
+  const addCategory = () => {
+    const n = newName.trim();
+    if (!n) return;
+    create.mutate(n, { onSuccess: () => setNewName("") });
+  };
+
+  return (
+    <section className="mb-10">
+      <div className="mb-3">
+        <h2 className="text-2xl font-serif italic">Material categories</h2>
+        <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+          Add, rename, or remove the top level of the browse tree. Deleting a category keeps its
+          papers — they move to “Uncategorized”.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-rule bg-card overflow-hidden">
+        {categories.map((c) => (
+          <div
+            key={c.id}
+            className="flex items-center gap-2 px-4 py-2 border-b border-rule/60 last:border-0"
+          >
+            <input
+              value={nameFor(c)}
+              onChange={(e) => setNames((s) => ({ ...s, [c.id]: e.target.value }))}
+              onBlur={() => {
+                const next = nameFor(c).trim();
+                if (next && next !== c.name) update.mutate({ id: c.id, name: next });
+              }}
+              className="flex-1 bg-transparent text-sm font-serif italic border-b border-transparent focus:border-primary focus:outline-none min-w-0"
+              aria-label="Category name"
+            />
+            <button
+              onClick={() => {
+                if (
+                  confirm(
+                    `Delete the "${c.name}" category? Its papers are kept and moved to Uncategorized.`,
+                  )
+                )
+                  del.mutate(c.id);
+              }}
+              className="text-muted-foreground hover:text-destructive transition-colors p-1 shrink-0"
+              aria-label="Delete category"
+              title="Delete category"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+        ))}
+        {categories.length === 0 && (
+          <div className="px-4 py-3 text-sm text-muted-foreground italic">No categories yet.</div>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") addCategory();
+          }}
+          placeholder="New category name (e.g. Fe-Cr)"
+          className="flex-1 max-w-xs bg-background border border-input rounded px-2 py-1.5 text-sm focus:outline-none focus:border-primary"
+        />
+        <button
+          onClick={addCategory}
+          disabled={!newName.trim() || create.isPending}
+          className="inline-flex items-center gap-1.5 rounded-md border border-rule px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
+        >
+          <Plus className="h-4 w-4" /> Add category
+        </button>
+      </div>
+    </section>
+  );
+}
+
+const FIELD_TYPES: FieldType[] = ["text", "number", "select", "image"];
 
 function SchemaManager() {
   const {
@@ -518,7 +612,7 @@ function TrendChart({ title, data, mounted }: { title: string; data: Bucket[]; m
       <div style={{ width: "100%", height: 180 }}>
         {mounted && (
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 4, right: 8, left: -18, bottom: 4 }}>
+            <BarChart data={data} margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
               <XAxis
                 dataKey="label"
                 tick={{ fontSize: 10, fill: "currentColor" }}
@@ -534,7 +628,8 @@ function TrendChart({ title, data, mounted }: { title: string; data: Bucket[]; m
                 tick={{ fontSize: 10, fill: "currentColor" }}
                 stroke="currentColor"
                 className="text-muted-foreground"
-                width={28}
+                width={40}
+                tickMargin={4}
               />
               <RTooltip
                 cursor={{ fill: "rgba(184,115,51,0.08)" }}

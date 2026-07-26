@@ -74,6 +74,96 @@ export function useCategories() {
   });
 }
 
+export function useCreateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error("Category name is required.");
+      // Place new categories after the current last one.
+      const { data: existing } = await supabase
+        .from("material_categories")
+        .select("sort_order")
+        .order("sort_order", { ascending: false })
+        .limit(1);
+      const nextSort = ((existing?.[0]?.sort_order as number | undefined) ?? 0) + 10;
+      const { data, error } = await supabase
+        .from("material_categories")
+        .insert({ name: trimmed, sort_order: nextSort })
+        .select()
+        .single();
+      if (error) throw error;
+      return data as Category;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+  });
+}
+
+export function useUpdateCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const { error } = await supabase
+        .from("material_categories")
+        .update({ name: name.trim() })
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+  });
+}
+
+// Delete a category. Papers keep existing (papers.category_id is ON DELETE SET
+// NULL), so they fall back to "Uncategorized" rather than being removed.
+export function useDeleteCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("material_categories").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      qc.invalidateQueries({ queryKey: ["papers"] });
+    },
+  });
+}
+
+// Public URL for a stored image path in the `papers` bucket.
+export function imagePublicUrl(path: string): string | null {
+  if (!path) return null;
+  const { data } = supabase.storage.from("papers").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+// Upload an image (a PDF snip or a picked file) for a specific experiment field
+// into the `papers` bucket, returning its public URL.
+export function useUploadExperimentImage() {
+  return useMutation({
+    mutationFn: async ({
+      paperId,
+      experimentId,
+      fieldKey,
+      blob,
+      ext = "png",
+    }: {
+      paperId: string;
+      experimentId: string;
+      fieldKey: string;
+      blob: Blob;
+      ext?: string;
+    }): Promise<string> => {
+      const path = `${paperId}/images/${experimentId}_${fieldKey}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from("papers")
+        .upload(path, blob, { contentType: blob.type || `image/${ext}`, upsert: true });
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from("papers").getPublicUrl(path);
+      return data.publicUrl;
+    },
+  });
+}
+
 export function usePapers() {
   return useQuery({
     queryKey: ["papers"],
@@ -93,10 +183,7 @@ export function useExperiments() {
   return useQuery({
     queryKey: ["experiments"],
     queryFn: async (): Promise<Experiment[]> => {
-      const { data, error } = await supabase
-        .from("experiments")
-        .select("*")
-        .order("position");
+      const { data, error } = await supabase.from("experiments").select("*").order("position");
       if (error) throw error;
       return (data || []).map((row: any) => ({
         ...row,
@@ -150,7 +237,10 @@ export function useUpdatePaper() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<Paper> }) => {
-      const { error } = await supabase.from("papers").update(patch as any).eq("id", id);
+      const { error } = await supabase
+        .from("papers")
+        .update(patch as any)
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["papers"] }),
@@ -243,7 +333,10 @@ export function useUpdateExperiment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, patch }: { id: string; patch: Partial<Experiment> }) => {
-      const { error } = await supabase.from("experiments").update(patch as any).eq("id", id);
+      const { error } = await supabase
+        .from("experiments")
+        .update(patch as any)
+        .eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["experiments"] }),

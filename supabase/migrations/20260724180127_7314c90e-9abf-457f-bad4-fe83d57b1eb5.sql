@@ -54,6 +54,5 @@ CREATE TRIGGER experiments_touch BEFORE UPDATE ON public.experiments FOR EACH RO
 INSERT INTO public.material_categories (name, sort_order) VALUES
   ('Ni-Cr-X', 10),
   ('Fe-Ni-Cr', 20),
-  ('Binary Ni-Cr', 30),
-  ('Fe-Cr RAFM', 40),
-  ('Scully Group', 50);
+  ('Ni-Cr', 30),
+  ('Fe-Cr', 40);

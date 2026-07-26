@@ -11,7 +11,7 @@
 
 // A column ("group") id. Kept as a free string so new columns can be added.
 export type FieldGroup = string;
-export type FieldType = "number" | "text" | "select";
+export type FieldType = "number" | "text" | "select" | "image";
 export type FieldState = "filled" | "missing" | "na" | "needs_check";
 
 export interface GroupDef {
@@ -105,6 +105,14 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     definition: "Did the IGC branch off into two or more grain boundaries at one node? (y/n)",
     options: ["y", "n"],
   },
+  {
+    key: "corrosion_image",
+    label: "Corrosion Image",
+    group: "physical",
+    type: "image",
+    definition:
+      "Micrograph or figure showing the corrosion attack for this experiment. Capture a region from the PDF with the snip tool, or upload an image.",
+  },
   // Chemical
   {
     key: "salt",
@@ -137,15 +145,6 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     type: "select",
     definition: "Container material holding the salt during the test.",
     options: ["Ni", "Graphite", "Alumina", "Quartz", "SS316", "Glassy carbon", "Mo"],
-  },
-  {
-    key: "test_type",
-    label: "Test type",
-    group: "chemical",
-    type: "select",
-    definition:
-      "Type of corrosion test: static immersion, potentiostatic (potential-controlled), or flowing salt.",
-    options: ["Static", "Potentiostatic", "Flowing"],
   },
   // Chemical — electrochemical conditions (carried over from the spreadsheet's
   // "Electrochemical Conditions" column).
