@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { FieldDef, FieldState, FieldValue } from "@/lib/fields";
 import { parseFieldInput, STATE_LABELS } from "@/lib/fields";
+import { AutoTextarea } from "./AutoTextarea";
 import { FieldTooltip } from "./FieldTooltip";
 import { StateBadge } from "./StateBadge";
 import {
@@ -42,10 +43,19 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
     onChange({ ...value, state: s });
   };
 
+  // Free-text fields get an auto-growing textarea so long entries fit; fields
+  // with options (dropdown) or numbers keep a single-line input.
+  const multiline = !field.options?.length && field.type !== "number";
+  const inputClass =
+    "w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono";
+
   return (
-    <div className="group grid grid-cols-[7rem_minmax(0,1fr)_auto] @sm:grid-cols-[9rem_minmax(0,1fr)_auto] items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
+    <div className="group flex items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
+      {/* Experiment selector on the left of the data point. */}
+      {expControl && <div className="pt-1 shrink-0">{expControl}</div>}
+
       <FieldTooltip field={field}>
-        <div className="pt-1.5 text-sm text-ink-muted cursor-help select-none break-words min-w-0">
+        <div className="pt-1.5 w-24 @sm:w-32 shrink-0 text-sm text-ink-muted cursor-help select-none break-words">
           {field.label}
           {field.unit && (
             <span className="ml-1 text-xs text-muted-foreground font-mono">({field.unit})</span>
@@ -53,18 +63,27 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
         </div>
       </FieldTooltip>
 
-      <div className="flex flex-col gap-1 min-w-0">
-        {/* Any field with options gets a dropdown (datalist) with free-text
-            fallback, regardless of its type. */}
-        <input
-          list={field.options?.length ? `opts-${field.key}` : undefined}
-          inputMode={field.type === "number" && !field.options?.length ? "decimal" : undefined}
-          value={local}
-          onChange={(e) => setLocal(e.target.value)}
-          onBlur={(e) => commit(e.target.value)}
-          placeholder={value.state === "na" ? "N/A" : "—"}
-          className="w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
-        />
+      <div className="flex flex-col gap-1 flex-1 min-w-0">
+        {multiline ? (
+          <AutoTextarea
+            value={local}
+            onChange={(e) => setLocal(e.target.value)}
+            onBlur={(e) => commit(e.target.value)}
+            rows={1}
+            placeholder={value.state === "na" ? "N/A" : "—"}
+            className={inputClass}
+          />
+        ) : (
+          <input
+            list={field.options?.length ? `opts-${field.key}` : undefined}
+            inputMode={field.type === "number" && !field.options?.length ? "decimal" : undefined}
+            value={local}
+            onChange={(e) => setLocal(e.target.value)}
+            onBlur={(e) => commit(e.target.value)}
+            placeholder={value.state === "na" ? "N/A" : "—"}
+            className={inputClass}
+          />
+        )}
         {field.options?.length ? (
           <datalist id={`opts-${field.key}`}>
             {field.options.map((o) => (
@@ -84,7 +103,6 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
       </div>
 
       <div className="flex items-center gap-1 pt-0.5 shrink-0">
-        {expControl}
         <DropdownMenu>
           <DropdownMenuTrigger className="focus:outline-none">
             <span className="inline-flex items-center gap-0.5 whitespace-nowrap">

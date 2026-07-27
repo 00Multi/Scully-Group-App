@@ -285,20 +285,34 @@ export function withDefaults(
 // A blank value used when an experiment has no stored entry for a field yet.
 export const MISSING_VALUE: FieldValue = { value: null, state: "missing" };
 
+// Inputs that mean "not applicable" — typing one auto-sets the N/A state.
+const NA_INPUTS = new Set(["n/a", "na", "n.a.", "not applicable"]);
+
 // Turn a raw input string into a FieldValue, parsing numbers and nudging the
-// state between filled/missing as the box gains or loses content. Shared by the
-// single-row editor and the multi-experiment comparison cells.
+// state between filled/missing/na as the box gains or loses content. Shared by
+// the single-row editor and the multi-experiment comparison cells.
 export function parseFieldInput(raw: string, field: FieldDef, prev: FieldValue): FieldValue {
   const trimmed = raw.trim();
+
+  // Typing "N/A" (or a common variant) sets the N/A state and clears the value.
+  if (NA_INPUTS.has(trimmed.toLowerCase())) {
+    return { ...prev, value: null, state: "na" };
+  }
+
   let parsed: string | number | null = trimmed === "" ? null : trimmed;
   if (field.type === "number" && trimmed !== "") {
     const n = Number(trimmed);
     parsed = Number.isFinite(n) ? n : trimmed;
   }
+  // Empty box: a filled cell becomes Missing; N/A / needs-check are left as-is
+  // (their box is legitimately blank). Typing content into a Missing or N/A
+  // cell promotes it to Filled.
   const nextState: FieldState =
-    trimmed === "" && prev.state === "filled"
-      ? "missing"
-      : trimmed !== "" && prev.state === "missing"
+    trimmed === ""
+      ? prev.state === "filled"
+        ? "missing"
+        : prev.state
+      : prev.state === "missing" || prev.state === "na"
         ? "filled"
         : prev.state;
   return { ...prev, value: parsed, state: nextState };

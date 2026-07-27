@@ -79,14 +79,16 @@ export function ImageFieldRow({
   const remove = () => onChange({ ...value, value: null, state: "missing" });
 
   return (
-    <div className="group grid grid-cols-[7rem_minmax(0,1fr)_auto] @sm:grid-cols-[9rem_minmax(0,1fr)_auto] items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
+    <div className="group flex items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
+      {expControl && <div className="pt-1 shrink-0">{expControl}</div>}
+
       <FieldTooltip field={field}>
-        <div className="pt-1.5 text-sm text-ink-muted cursor-help select-none break-words min-w-0">
+        <div className="pt-1.5 w-24 @sm:w-32 shrink-0 text-sm text-ink-muted cursor-help select-none break-words">
           {field.label}
         </div>
       </FieldTooltip>
 
-      <div className="flex flex-col gap-2 min-w-0">
+      <div className="flex flex-col gap-2 flex-1 min-w-0">
         {url ? (
           <div className="relative inline-block">
             <a href={url} target="_blank" rel="noreferrer" title="Open full image">
@@ -137,7 +139,6 @@ export function ImageFieldRow({
       </div>
 
       <div className="flex items-center gap-1 pt-0.5 shrink-0">
-        {expControl}
         <DropdownMenu>
           <DropdownMenuTrigger className="focus:outline-none">
             <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
