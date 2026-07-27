@@ -6,9 +6,15 @@ import type { FieldState } from "@/lib/fields";
 import { useFieldDefs } from "@/lib/settings";
 
 export type StateFilter = "any" | FieldState;
-export type SortMode = "default" | "active" | "filled" | "added_new" | "added_old";
+export type SortMode =
+  "default" | "alpha_az" | "alpha_za" | "active" | "filled" | "added_new" | "added_old";
 
 const ALLOY_TYPE_KEY = "alloy_type";
+
+// The label shown for a paper in the tree, used for alphabetical sorting.
+function alphaKey(p: Paper): string {
+  return (p.citation_key || p.author || p.title || "").trim();
+}
 
 interface Props {
   papers: Paper[];
@@ -132,7 +138,11 @@ export function BrowseTree({
     if (sortBy !== "default") {
       const mt = (id: string) => metrics.get(id)!;
       list = [...list];
-      if (sortBy === "active")
+      const collate = (a: string, b: string) =>
+        a.localeCompare(b, undefined, { sensitivity: "base", numeric: true });
+      if (sortBy === "alpha_az") list.sort((a, b) => collate(alphaKey(a), alphaKey(b)));
+      else if (sortBy === "alpha_za") list.sort((a, b) => collate(alphaKey(b), alphaKey(a)));
+      else if (sortBy === "active")
         list.sort((a, b) => mt(b.id).activity.localeCompare(mt(a.id).activity));
       else if (sortBy === "filled") list.sort((a, b) => mt(b.id).filled - mt(a.id).filled);
       else if (sortBy === "added_new")
@@ -188,6 +198,8 @@ export function BrowseTree({
             aria-label="Sort papers"
           >
             <option value="default">Sort: default</option>
+            <option value="alpha_az">Sort: A → Z</option>
+            <option value="alpha_za">Sort: Z → A</option>
             <option value="active">Sort: recently active</option>
             <option value="filled">Sort: most data filled</option>
             <option value="added_new">Sort: newest added</option>
