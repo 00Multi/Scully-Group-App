@@ -16,6 +16,32 @@ function alphaKey(p: Paper): string {
   return (p.citation_key || p.author || p.title || "").trim();
 }
 
+// Remember the tree's sort, alloy filter, and which papers are expanded across
+// tab switches.
+const TREE_STATE_KEY = "browse.tree.v1";
+interface TreeUIState {
+  sortBy: SortMode;
+  alloyFilter: string;
+  openPapers: Record<string, boolean>;
+}
+function loadTreeState(): Partial<TreeUIState> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(TREE_STATE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<TreeUIState>) : null;
+  } catch {
+    return null;
+  }
+}
+function saveTreeState(s: TreeUIState) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TREE_STATE_KEY, JSON.stringify(s));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 interface Props {
   papers: Paper[];
   experiments: Experiment[];
@@ -69,8 +95,25 @@ export function BrowseTree({
   const [openPapers, setOpenPapers] = useState<Record<string, boolean>>({});
   const [sortBy, setSortBy] = useState<SortMode>("default");
   const [alloyFilter, setAlloyFilter] = useState<string>("all");
+  const [restored, setRestored] = useState(false);
   const createPaper = useCreatePaper();
   const fieldDefs = useFieldDefs();
+
+  // Restore the persisted tree state once, client-side.
+  useEffect(() => {
+    const saved = loadTreeState();
+    if (saved) {
+      if (saved.sortBy) setSortBy(saved.sortBy);
+      if (saved.alloyFilter) setAlloyFilter(saved.alloyFilter);
+      if (saved.openPapers) setOpenPapers(saved.openPapers);
+    }
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!restored) return;
+    saveTreeState({ sortBy, alloyFilter, openPapers });
+  }, [restored, sortBy, alloyFilter, openPapers]);
 
   useEffect(() => {
     if (selectedPaperId) setOpenPapers((s) => ({ ...s, [selectedPaperId]: true }));

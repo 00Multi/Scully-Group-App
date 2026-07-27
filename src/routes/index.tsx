@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { usePapers, useExperiments } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
+import { AutoTextarea } from "@/components/AutoTextarea";
 import { DangerZone } from "@/components/DangerZone";
 import { TrendChart } from "@/components/TrendChart";
 import {
@@ -433,12 +434,12 @@ function SchemaManager() {
                   ))}
                 </select>
                 <div className="flex flex-col gap-1">
-                  <textarea
+                  <AutoTextarea
                     value={f.definition}
                     onChange={(e) => updateField(f.key, { definition: e.target.value })}
                     rows={1}
                     placeholder="What this data point means (shown as a tooltip)"
-                    className="bg-transparent border border-input rounded px-2 py-1 text-xs focus:border-primary focus:outline-none resize-y min-h-[2rem]"
+                    className="bg-transparent border border-input rounded px-2 py-1 text-xs focus:border-primary focus:outline-none min-h-[2rem]"
                     aria-label="Definition"
                   />
                   <OptionsInput

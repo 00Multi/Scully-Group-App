@@ -8,6 +8,7 @@ import {
   useRemovePaperPdf,
 } from "@/lib/db";
 import { fetchCrossref, isLikelyDoi } from "@/lib/crossref";
+import { AutoTextarea } from "./AutoTextarea";
 import { InstitutionEditor } from "./InstitutionEditor";
 import { FileUp, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 
@@ -323,7 +324,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
             Abstract {autoHint("abstract")}
           </label>
-          <textarea
+          <AutoTextarea
             value={state.abstract}
             onChange={(e) => setState({ ...state, abstract: e.target.value })}
             onBlur={() => commit({ abstract: state.abstract, summary: state.abstract })}
@@ -337,7 +338,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
             Notes
           </label>
-          <textarea
+          <AutoTextarea
             value={state.notes}
             onChange={(e) => setState({ ...state, notes: e.target.value })}
             onBlur={() => commit({ notes: state.notes })}
