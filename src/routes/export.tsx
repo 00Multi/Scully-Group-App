@@ -57,6 +57,36 @@ function ExportPage() {
   const [selectedCats, setSelectedCats] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
+  // Data points (fields) to leave OUT of the export. Empty = include everything.
+  const [excludedFields, setExcludedFields] = useState<Set<string>>(() => new Set());
+
+  // Only the selected columns/data points go into every export format.
+  const activeFields = useMemo(
+    () => fieldDefs.filter((f) => !excludedFields.has(f.key)),
+    [fieldDefs, excludedFields],
+  );
+  const activeGroups = useMemo(
+    () => groups.filter((g) => activeFields.some((f) => f.group === g.id)),
+    [groups, activeFields],
+  );
+
+  const toggleField = (key: string) =>
+    setExcludedFields((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const setGroupIncluded = (groupId: string, included: boolean) =>
+    setExcludedFields((prev) => {
+      const next = new Set(prev);
+      for (const f of fieldDefs)
+        if (f.group === groupId) {
+          if (included) next.delete(f.key);
+          else next.add(f.key);
+        }
+      return next;
+    });
 
   const catActive = (id: string | null) =>
     selectedCats.size === 0 ||
@@ -97,8 +127,8 @@ function ExportPage() {
   );
 
   const exportData: ExportData = {
-    groups,
-    fields: fieldDefs,
+    groups: activeGroups,
+    fields: activeFields,
     papers: filteredPapers,
     experiments: filteredExps,
     categories,
@@ -119,7 +149,7 @@ function ExportPage() {
       $meta: "schema",
       version: 2,
       generated_at: new Date().toISOString(),
-      fields: fieldDefs.map((f) => ({
+      fields: activeFields.map((f) => ({
         key: f.key,
         label: f.label,
         group: f.group,
@@ -150,7 +180,7 @@ function ExportPage() {
         },
         label: e.label,
         fields: Object.fromEntries(
-          fieldDefs.map((f) => {
+          activeFields.map((f) => {
             const v = e.values?.[f.key] ?? { value: null, state: "missing" };
             return [
               f.key,
@@ -165,7 +195,7 @@ function ExportPage() {
       });
     }
     return { schema, records };
-  }, [categories, filteredPapers, filteredExps, fieldDefs]);
+  }, [categories, filteredPapers, filteredExps, activeFields]);
 
   const jsonl = useMemo(
     () => [schema, ...records].map((x) => JSON.stringify(x)).join("\n"),
@@ -195,7 +225,8 @@ function ExportPage() {
         Machine-readable <strong>JSONL</strong>, <strong>JSON</strong>, or <strong>CSV</strong> for
         AI training and reuse, a human-readable <strong>XLSX</strong> reproducing the four column
         groups, and a printable <strong>PDF report</strong> grouped by material category. All
-        formats respect the filter below — category, search, and field state.
+        formats respect the filters below — category, search, field state, and which columns / data
+        points to include.
       </p>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-4">
@@ -253,6 +284,88 @@ function ExportPage() {
         </p>
       </div>
 
+      <div className="mt-6 rounded-lg border border-rule bg-card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+            Columns &amp; data points to include
+          </h3>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-muted-foreground">
+              {activeFields.length}/{fieldDefs.length} data points
+            </span>
+            <button
+              onClick={() => setExcludedFields(new Set())}
+              className="text-copper hover:underline"
+            >
+              All
+            </button>
+            <button
+              onClick={() => setExcludedFields(new Set(fieldDefs.map((f) => f.key)))}
+              className="text-copper hover:underline"
+            >
+              None
+            </button>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {groups.map((g) => {
+            const gf = fieldDefs.filter((f) => f.group === g.id);
+            if (gf.length === 0) return null;
+            const onCount = gf.filter((f) => !excludedFields.has(f.key)).length;
+            const allOn = onCount === gf.length;
+            return (
+              <div key={g.id}>
+                <button
+                  onClick={() => setGroupIncluded(g.id, !allOn)}
+                  className="flex items-center gap-1.5 text-sm font-medium mb-1"
+                  title={allOn ? "Exclude this whole column" : "Include this whole column"}
+                >
+                  <span
+                    className={
+                      "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] " +
+                      (onCount === 0
+                        ? "border-input"
+                        : allOn
+                          ? "bg-primary border-primary text-primary-foreground"
+                          : "bg-primary/40 border-primary text-primary-foreground")
+                    }
+                  >
+                    {onCount > 0 ? "✓" : ""}
+                  </span>
+                  {g.label}
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {onCount}/{gf.length}
+                  </span>
+                </button>
+                <div className="flex flex-wrap gap-1.5 pl-5">
+                  {gf.map((f) => {
+                    const on = !excludedFields.has(f.key);
+                    return (
+                      <button
+                        key={f.key}
+                        onClick={() => toggleField(f.key)}
+                        className={
+                          "rounded-full border px-2.5 py-0.5 text-xs transition-colors " +
+                          (on
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-rule text-muted-foreground hover:bg-accent")
+                        }
+                      >
+                        {f.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Paper columns (author, year, DOI, summary, notes…) are always included. These toggles
+          control which experiment data points appear in every format below.
+        </p>
+      </div>
+
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <FormatCard
           icon={<FileJson className="h-5 w-5" />}
@@ -300,7 +413,7 @@ function ExportPage() {
         <div className="grid grid-cols-3 gap-4 text-sm">
           <Stat label="Papers" value={filteredPapers.length} />
           <Stat label="Experiment records" value={recordCount} />
-          <Stat label="Fields per record" value={fieldDefs.length} />
+          <Stat label="Data points per record" value={activeFields.length} />
         </div>
         <button
           onClick={() => setPreview((v) => !v)}

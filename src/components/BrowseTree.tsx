@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, Plus, Search } from "lucide-react";
+import { ArrowDownWideNarrow, ChevronRight, Plus, Search } from "lucide-react";
 import type { Category, Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
+import { useFieldDefs } from "@/lib/settings";
 
 export type StateFilter = "any" | FieldState;
+export type SortMode = "default" | "active" | "filled" | "added_new" | "added_old";
 
 interface Props {
   categories: Category[];
@@ -57,7 +59,9 @@ export function BrowseTree({
     Object.fromEntries(categories.map((c) => [c.id, true])),
   );
   const [openPapers, setOpenPapers] = useState<Record<string, boolean>>({});
+  const [sortBy, setSortBy] = useState<SortMode>("default");
   const createPaper = useCreatePaper();
+  const fieldDefs = useFieldDefs();
 
   // Keep the selected paper's experiments expanded so the active row is visible.
   useEffect(() => {
@@ -90,6 +94,40 @@ export function BrowseTree({
     return matchesSearch(p, exps, search) && matchesStateFilter(exps, stateFilter);
   };
 
+  // Per-paper sort metrics: last activity (max of the paper's and its
+  // experiments' updated_at), fraction of fields filled, and date added.
+  const metrics = useMemo(() => {
+    const m = new Map<string, { activity: string; filled: number; created: string }>();
+    for (const p of papers) {
+      const exps = expsByPaper.get(p.id) ?? [];
+      let activity = p.updated_at;
+      let filled = 0;
+      let total = 0;
+      for (const e of exps) {
+        if (e.updated_at > activity) activity = e.updated_at;
+        for (const f of fieldDefs) {
+          total++;
+          if (e.values?.[f.key]?.state === "filled") filled++;
+        }
+      }
+      m.set(p.id, { activity, filled: total ? filled / total : 0, created: p.created_at });
+    }
+    return m;
+  }, [papers, expsByPaper, fieldDefs]);
+
+  const sortPapers = (list: Paper[]): Paper[] => {
+    if (sortBy === "default") return list;
+    const arr = [...list];
+    const mt = (id: string) => metrics.get(id)!;
+    if (sortBy === "active") arr.sort((a, b) => mt(b.id).activity.localeCompare(mt(a.id).activity));
+    else if (sortBy === "filled") arr.sort((a, b) => mt(b.id).filled - mt(a.id).filled);
+    else if (sortBy === "added_new")
+      arr.sort((a, b) => mt(b.id).created.localeCompare(mt(a.id).created));
+    else if (sortBy === "added_old")
+      arr.sort((a, b) => mt(a.id).created.localeCompare(mt(b.id).created));
+    return arr;
+  };
+
   return (
     <aside className="w-72 shrink-0 border-r border-rule bg-card/50 flex flex-col h-[calc(100vh-3.5rem)] sticky top-14">
       <div className="p-3 border-b border-rule space-y-2">
@@ -113,10 +151,25 @@ export function BrowseTree({
           <option value="na">Has N/A</option>
           <option value="filled">Has filled</option>
         </select>
+        <div className="relative">
+          <ArrowDownWideNarrow className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortMode)}
+            className="w-full pl-7 pr-2 py-1.5 text-xs bg-background border border-input rounded focus:outline-none"
+            aria-label="Sort papers"
+          >
+            <option value="default">Sort: default (by category)</option>
+            <option value="active">Sort: recently active</option>
+            <option value="filled">Sort: most data filled</option>
+            <option value="added_new">Sort: newest added</option>
+            <option value="added_old">Sort: oldest added</option>
+          </select>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto py-2">
         {categories.map((cat) => {
-          const catPapers = (grouped.get(cat.id) ?? []).filter(filterPaper);
+          const catPapers = sortPapers((grouped.get(cat.id) ?? []).filter(filterPaper));
           const open = openCats[cat.id] ?? true;
           return (
             <div key={cat.id} className="mb-1">
