@@ -43,50 +43,78 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
     onChange({ ...value, state: s });
   };
 
-  // Free-text fields get an auto-growing textarea so long entries fit; fields
-  // with options (dropdown) or numbers keep a single-line input.
-  const multiline = !field.options?.length && field.type !== "number";
+  // Every field auto-fits its text (wrapping to more lines when needed) except
+  // numbers, which stay on one line. Fields with options keep a compact
+  // suggestion dropdown next to the box.
+  const hasOptions = !!field.options?.length;
+  const isNumber = field.type === "number";
   const inputClass =
     "w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono";
 
   return (
-    <div className="group flex items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
+    <div className="group flex items-start gap-2 py-2 border-b border-rule/60 last:border-0">
       {/* Experiment selector on the left of the data point. */}
       {expControl && <div className="pt-1 shrink-0">{expControl}</div>}
 
       <FieldTooltip field={field}>
-        <div className="pt-1.5 w-24 @sm:w-32 shrink-0 text-sm text-ink-muted cursor-help select-none break-words">
+        <div className="pt-1.5 w-16 @sm:w-20 shrink-0 text-xs leading-tight text-ink-muted cursor-help select-none break-words hyphens-auto">
           {field.label}
           {field.unit && (
-            <span className="ml-1 text-xs text-muted-foreground font-mono">({field.unit})</span>
+            <span className="ml-1 text-[10px] text-muted-foreground font-mono">({field.unit})</span>
           )}
         </div>
       </FieldTooltip>
 
       <div className="flex flex-col gap-1 flex-1 min-w-0">
-        {multiline ? (
-          <AutoTextarea
+        {isNumber ? (
+          <input
+            list={hasOptions ? `opts-${field.key}` : undefined}
+            inputMode={hasOptions ? undefined : "decimal"}
             value={local}
             onChange={(e) => setLocal(e.target.value)}
             onBlur={(e) => commit(e.target.value)}
-            rows={1}
             placeholder={value.state === "na" ? "N/A" : "—"}
             className={inputClass}
           />
         ) : (
-          <input
-            list={field.options?.length ? `opts-${field.key}` : undefined}
-            inputMode={field.type === "number" && !field.options?.length ? "decimal" : undefined}
-            value={local}
-            onChange={(e) => setLocal(e.target.value)}
-            onBlur={(e) => commit(e.target.value)}
-            placeholder={value.state === "na" ? "N/A" : "—"}
-            className={inputClass}
-          />
+          <div className="relative">
+            <AutoTextarea
+              autoOnly
+              value={local}
+              onChange={(e) => setLocal(e.target.value)}
+              onBlur={(e) => commit(e.target.value)}
+              rows={1}
+              placeholder={value.state === "na" ? "N/A" : "—"}
+              className={inputClass + (hasOptions ? " pr-5" : "")}
+            />
+            {hasOptions && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className="absolute right-0 top-1 text-muted-foreground hover:text-foreground focus:outline-none"
+                  title="Pick a suggested value"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="max-h-64 overflow-auto">
+                  {field.options!.map((o) => (
+                    <DropdownMenuItem
+                      key={o}
+                      onSelect={() => {
+                        setLocal(o);
+                        commit(o);
+                      }}
+                    >
+                      {o}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         )}
-        {field.options?.length ? (
+        {isNumber && hasOptions ? (
           <datalist id={`opts-${field.key}`}>
-            {field.options.map((o) => (
+            {field.options!.map((o) => (
               <option key={o} value={o} />
             ))}
           </datalist>

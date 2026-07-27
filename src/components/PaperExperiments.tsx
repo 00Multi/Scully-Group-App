@@ -555,7 +555,7 @@ function SingleView({
         </header>
       )}
 
-      <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-x-8 gap-y-0 px-5 py-3">
+      <div className="grid grid-cols-1 @4xl:grid-cols-2 gap-x-6 gap-y-0 px-5 py-3">
         {orderedGroups.map((group) => (
           <section key={group.id} className="min-w-0">
             <h4 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mt-2 mb-1">
