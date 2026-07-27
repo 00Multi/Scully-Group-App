@@ -5,6 +5,7 @@ export interface CrossrefResult {
   title: string;
   authors: string; // "Zheng, Sridharan" — short form for the Author field
   authorsFull: string[]; // full ordered list "Given Family"
+  institution: string; // affiliation(s) of the authors, if Crossref lists them
   year: number | null;
   journal: string;
   volume: string;
@@ -53,13 +54,28 @@ export async function fetchCrossref(rawDoi: string): Promise<CrossrefResult> {
   const json = await res.json();
   const m = json.message ?? {};
 
-  const authorObjs: { given?: string; family?: string; name?: string }[] = m.author ?? [];
+  const authorObjs: {
+    given?: string;
+    family?: string;
+    name?: string;
+    affiliation?: { name?: string }[];
+  }[] = m.author ?? [];
   const authorsFull = authorObjs.map((a) =>
     a.name ? a.name : [a.given, a.family].filter(Boolean).join(" "),
   );
   const families = authorObjs.map((a) => a.family || a.name || "").filter(Boolean);
-  const authorsShort =
-    families.length <= 3 ? families.join(", ") : `${families[0]} et al.`;
+  const authorsShort = families.length <= 3 ? families.join(", ") : `${families[0]} et al.`;
+
+  // Distinct author affiliations, in first-seen order. Crossref only carries
+  // these when the publisher supplied them, so this is often empty.
+  const affiliations: string[] = [];
+  for (const a of authorObjs) {
+    for (const aff of a.affiliation ?? []) {
+      const name = (aff?.name ?? "").trim();
+      if (name && !affiliations.includes(name)) affiliations.push(name);
+    }
+  }
+  const institution = affiliations.join("; ");
 
   const dateParts =
     m.issued?.["date-parts"]?.[0] ??
@@ -72,11 +88,12 @@ export async function fetchCrossref(rawDoi: string): Promise<CrossrefResult> {
   const firstFamily = families[0] ?? (m.title?.[0] ?? "").split(/\s+/)[0] ?? "Untitled";
 
   return {
-    title: Array.isArray(m.title) ? m.title[0] ?? "" : m.title ?? "",
+    title: Array.isArray(m.title) ? (m.title[0] ?? "") : (m.title ?? ""),
     authors: authorsShort,
     authorsFull,
+    institution,
     year,
-    journal: Array.isArray(m["container-title"]) ? m["container-title"][0] ?? "" : "",
+    journal: Array.isArray(m["container-title"]) ? (m["container-title"][0] ?? "") : "",
     volume: m.volume ?? "",
     issue: m.issue ?? "",
     pages: m.page ?? "",

@@ -1,20 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Bar as RBar,
-  BarChart,
-  Cell,
-  ResponsiveContainer,
-  Tooltip as RTooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { usePapers, useExperiments } from "@/lib/db";
-import type { Experiment } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { DangerZone } from "@/components/DangerZone";
-import { Plus, RotateCcw, Trash2 } from "lucide-react";
+import { TrendChart } from "@/components/TrendChart";
+import {
+  categoricalDistribution,
+  numericHistogram,
+  papersPerYear as computePapersPerYear,
+} from "@/lib/trends";
+import { ArrowRight, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -92,32 +88,18 @@ function Dashboard() {
 
   const overallPct = stats.totalCells ? Math.round((stats.filled / stats.totalCells) * 100) : 0;
 
-  const papersPerYear = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const p of papers) if (p.year != null) m.set(p.year, (m.get(p.year) ?? 0) + 1);
-    return Array.from(m.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([year, count]) => ({ label: String(year), count }));
-  }, [papers]);
-
+  // A curated handful of trends for the home page; the full set (any data point
+  // plus metadata) lives on /trends behind "See more".
+  const papersPerYear = useMemo(() => computePapersPerYear(papers), [papers]);
   const saltDist = useMemo(() => categoricalDistribution(experiments, "salt"), [experiments]);
   const crucibleDist = useMemo(
     () => categoricalDistribution(experiments, "crucible"),
     [experiments],
   );
-  const flowStaticDist = useMemo(
-    () => categoricalDistribution(experiments, "flow_static"),
-    [experiments],
-  );
-  const tempHist = useMemo(() => temperatureHistogram(experiments), [experiments]);
+  const tempHist = useMemo(() => numericHistogram(experiments, "temp_c"), [experiments]);
 
   const hasTrendData =
-    papersPerYear.length +
-      saltDist.length +
-      crucibleDist.length +
-      flowStaticDist.length +
-      tempHist.length >
-    0;
+    papersPerYear.length + saltDist.length + crucibleDist.length + tempHist.length > 0;
 
   // recharts needs a real width; render charts only after mount to avoid
   // SSR/hydration width mismatches.
@@ -206,13 +188,20 @@ function Dashboard() {
 
       {hasTrendData && (
         <section className="mb-10">
-          <h2 className="text-2xl font-serif italic mb-3">Trends</h2>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2 className="text-2xl font-serif italic">Trends</h2>
+            <Link
+              to="/trends"
+              className="text-xs text-copper hover:underline inline-flex items-center gap-1"
+            >
+              See more <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <TrendChart title="Papers per year" data={papersPerYear} mounted={mounted} />
             <TrendChart title="Test temperature (°C)" data={tempHist} mounted={mounted} />
             <TrendChart title="Salts" data={saltDist} mounted={mounted} />
             <TrendChart title="Crucibles" data={crucibleDist} mounted={mounted} />
-            <TrendChart title="Flowing / static" data={flowStaticDist} mounted={mounted} />
           </div>
         </section>
       )}
@@ -476,106 +465,6 @@ function SchemaManager() {
         <Plus className="h-4 w-4" /> Add column
       </button>
     </section>
-  );
-}
-
-interface Bucket {
-  label: string;
-  count: number;
-}
-
-// Count filled/needs-check values of a field across experiments, grouping the
-// long tail into "Other" so the chart stays legible.
-function categoricalDistribution(experiments: Experiment[], key: string): Bucket[] {
-  const m = new Map<string, number>();
-  for (const e of experiments) {
-    const v = e.values?.[key];
-    if (!v || (v.state !== "filled" && v.state !== "needs_check")) continue;
-    if (v.value == null || String(v.value).trim() === "") continue;
-    const label = String(v.value).trim();
-    m.set(label, (m.get(label) ?? 0) + 1);
-  }
-  const sorted = Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
-  const top = sorted.slice(0, 8).map(([label, count]) => ({ label, count }));
-  const rest = sorted.slice(8).reduce((s, [, c]) => s + c, 0);
-  if (rest > 0) top.push({ label: "Other", count: rest });
-  return top;
-}
-
-function temperatureHistogram(experiments: Experiment[]): Bucket[] {
-  const temps: number[] = [];
-  for (const e of experiments) {
-    const v = e.values?.["temp_c"];
-    if (!v || v.state !== "filled") continue;
-    const n = typeof v.value === "number" ? v.value : Number(v.value);
-    if (Number.isFinite(n)) temps.push(n);
-  }
-  if (temps.length === 0) return [];
-  const size = 100; // °C bins
-  const m = new Map<number, number>();
-  for (const t of temps) {
-    const bin = Math.floor(t / size) * size;
-    m.set(bin, (m.get(bin) ?? 0) + 1);
-  }
-  return Array.from(m.entries())
-    .sort((a, b) => a[0] - b[0])
-    .map(([bin, count]) => ({ label: `${bin}–${bin + size}`, count }));
-}
-
-const CHART_COLORS = [
-  "#b87333", // copper
-  "#8c9db5",
-  "#6b8f71",
-  "#c2a36b",
-  "#9a7aa0",
-  "#7a9bb0",
-  "#b0846b",
-  "#7f8ca3",
-  "#a0a0a0",
-];
-
-function TrendChart({ title, data, mounted }: { title: string; data: Bucket[]; mounted: boolean }) {
-  if (data.length === 0) return null;
-  return (
-    <div className="rounded-lg border border-rule bg-card p-4">
-      <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-3">{title}</h3>
-      <div style={{ width: "100%", height: 180 }}>
-        {mounted && (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} margin={{ top: 4, right: 8, left: 4, bottom: 4 }}>
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 10, fill: "currentColor" }}
-                interval={0}
-                angle={data.length > 5 ? -30 : 0}
-                textAnchor={data.length > 5 ? "end" : "middle"}
-                height={data.length > 5 ? 46 : 20}
-                stroke="currentColor"
-                className="text-muted-foreground"
-              />
-              <YAxis
-                allowDecimals={false}
-                tick={{ fontSize: 10, fill: "currentColor" }}
-                stroke="currentColor"
-                className="text-muted-foreground"
-                width={40}
-                tickMargin={4}
-              />
-              <RTooltip
-                cursor={{ fill: "rgba(184,115,51,0.08)" }}
-                contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                labelStyle={{ fontWeight: 600 }}
-              />
-              <RBar dataKey="count" radius={[3, 3, 0, 0]}>
-                {data.map((_, i) => (
-                  <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                ))}
-              </RBar>
-            </BarChart>
-          </ResponsiveContainer>
-        )}
-      </div>
-    </div>
   );
 }
 

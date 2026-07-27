@@ -16,6 +16,7 @@ type Draft = {
   title: string;
   doi: string;
   journal: string;
+  institution: string;
   abstract: string;
   summary: string;
   notes: string;
@@ -35,6 +36,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
     title: p.title,
     doi: p.doi,
     journal: p.journal ?? "",
+    institution: p.institution ?? "",
     abstract: p.abstract,
     summary: p.summary,
     notes: p.notes ?? "",
@@ -83,13 +85,16 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
       const nextAuto: Record<string, boolean> = { ...auto };
       const patch: Partial<Draft> = {};
       // Only fill empty fields; never clobber values already entered.
-      if (!state.title && r.title) (patch.title = r.title), (nextAuto.title = true);
-      if (!state.author && r.authors) (patch.author = r.authors), (nextAuto.author = true);
-      if (state.year == null && r.year != null) (patch.year = r.year), (nextAuto.year = true);
-      if (!state.journal && r.journal) (patch.journal = r.journal), (nextAuto.journal = true);
-      if (!state.abstract && r.abstract) (patch.abstract = r.abstract), (nextAuto.abstract = true);
+      if (!state.title && r.title) ((patch.title = r.title), (nextAuto.title = true));
+      if (!state.author && r.authors) ((patch.author = r.authors), (nextAuto.author = true));
+      if (state.year == null && r.year != null) ((patch.year = r.year), (nextAuto.year = true));
+      if (!state.journal && r.journal) ((patch.journal = r.journal), (nextAuto.journal = true));
+      if (!state.institution && r.institution)
+        ((patch.institution = r.institution), (nextAuto.institution = true));
+      if (!state.abstract && r.abstract)
+        ((patch.abstract = r.abstract), (nextAuto.abstract = true));
       // Abstract copied into Summary if Summary is empty (PRD F2).
-      if (!state.summary && r.abstract) (patch.summary = r.abstract), (nextAuto.summary = true);
+      if (!state.summary && r.abstract) ((patch.summary = r.abstract), (nextAuto.summary = true));
 
       const meta = {
         ...(paper.meta ?? {}),
@@ -117,7 +122,9 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
       });
       const filled = Object.keys(patch).length;
       setPrefillMsg(
-        filled ? `Filled ${filled} empty field${filled === 1 ? "" : "s"} from Crossref.` : "Crossref found the record — all fields already had values.",
+        filled
+          ? `Filled ${filled} empty field${filled === 1 ? "" : "s"} from Crossref.`
+          : "Crossref found the record — all fields already had values.",
       );
     } catch (e: any) {
       setPrefillMsg(e?.message ?? "Crossref lookup failed.");
@@ -269,7 +276,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             <button
               onClick={prefill}
               disabled={prefilling}
-              title="Fill title, authors, year, journal, and abstract from Crossref"
+              title="Fill title, authors, year, journal, institution, and abstract from Crossref"
               className="inline-flex items-center gap-1 rounded border border-rule px-2 py-1 text-xs hover:bg-accent transition-colors disabled:opacity-50 shrink-0"
             >
               {prefilling ? (
@@ -292,6 +299,19 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             onBlur={() => commit({ journal: state.journal })}
             onFocus={() => clearAuto("journal")}
             placeholder="Journal name"
+            className="w-full mt-1 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            Institution {autoHint("institution")}
+          </label>
+          <input
+            value={state.institution}
+            onChange={(e) => setState({ ...state, institution: e.target.value })}
+            onBlur={() => commit({ institution: state.institution })}
+            onFocus={() => clearAuto("institution")}
+            placeholder="Affiliation / institution"
             className="w-full mt-1 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1"
           />
         </div>

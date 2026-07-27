@@ -174,6 +174,7 @@ function RootComponent() {
               <nav className="flex items-center gap-1">
                 <NavLink to="/">Dashboard</NavLink>
                 <NavLink to="/browse">Browse</NavLink>
+                <NavLink to="/trends">Trends</NavLink>
                 <NavLink to="/bulk">Bulk</NavLink>
                 <NavLink to="/import">Import</NavLink>
                 <NavLink to="/export">Export</NavLink>
