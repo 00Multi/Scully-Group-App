@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { FieldDef, FieldState, FieldValue } from "@/lib/fields";
-import { STATE_LABELS } from "@/lib/fields";
+import { parseFieldInput, STATE_LABELS } from "@/lib/fields";
 import { FieldTooltip } from "./FieldTooltip";
 import { StateBadge } from "./StateBadge";
 import {
@@ -16,11 +16,14 @@ interface Props {
   value: FieldValue;
   onChange: (next: FieldValue) => void;
   onDelete?: () => void;
+  // Optional control (e.g. a per-row experiment selector) shown before the state
+  // badge. Lets each data-point row indicate which experiment it displays.
+  expControl?: ReactNode;
 }
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
 
-export function FieldRow({ field, value, onChange, onDelete }: Props) {
+export function FieldRow({ field, value, onChange, onDelete, expControl }: Props) {
   const [local, setLocal] = useState<string>(
     value.value === null || value.value === undefined ? "" : String(value.value),
   );
@@ -32,15 +35,7 @@ export function FieldRow({ field, value, onChange, onDelete }: Props) {
   }, [value.value, value.note]);
 
   const commit = (raw: string) => {
-    const trimmed = raw.trim();
-    let parsed: string | number | null = trimmed === "" ? null : trimmed;
-    if (field.type === "number" && trimmed !== "") {
-      const n = Number(trimmed);
-      parsed = Number.isFinite(n) ? n : trimmed;
-    }
-    const nextState: FieldState =
-      trimmed === "" && value.state === "filled" ? "missing" : trimmed !== "" && value.state === "missing" ? "filled" : value.state;
-    onChange({ ...value, value: parsed, state: nextState });
+    onChange(parseFieldInput(raw, field, value));
   };
 
   const setState = (s: FieldState) => {
@@ -89,6 +84,7 @@ export function FieldRow({ field, value, onChange, onDelete }: Props) {
       </div>
 
       <div className="flex items-center gap-1 pt-0.5 shrink-0">
+        {expControl}
         <DropdownMenu>
           <DropdownMenuTrigger className="focus:outline-none">
             <span className="inline-flex items-center gap-0.5 whitespace-nowrap">

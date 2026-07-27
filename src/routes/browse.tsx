@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { BrowseTree, type StateFilter } from "@/components/BrowseTree";
 import { PaperHeader } from "@/components/PaperHeader";
-import { ExperimentEditor } from "@/components/ExperimentEditor";
+import { PaperExperiments } from "@/components/PaperExperiments";
 import { PdfViewer } from "@/components/PdfViewer";
 import { PdfDropZone } from "@/components/PdfDropZone";
 import { usePapers, useExperiments } from "@/lib/db";
@@ -77,12 +77,18 @@ function DataPane({
   onCreated,
   scrollRef,
   onScroll,
+  allowMulti,
+  activeExpId,
+  onActiveExp,
 }: {
   paper: Paper;
   exps: ReturnType<typeof useExperiments>["data"];
   onCreated: (id: string) => void;
   scrollRef: (el: HTMLDivElement | null) => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
+  allowMulti: boolean;
+  activeExpId: string | null;
+  onActiveExp: (id: string) => void;
 }) {
   const list = exps ?? [];
   return (
@@ -90,14 +96,14 @@ function DataPane({
       <div className="space-y-4">
         <PdfDropZone onCreated={onCreated} />
         <PaperHeader paper={paper} nextPosition={list.length} />
-        {list.map((exp) => (
-          <ExperimentEditor key={exp.id} paper={paper} experiment={exp} />
-        ))}
-        {list.length === 0 && (
-          <div className="text-sm text-muted-foreground italic p-6 border border-dashed border-rule rounded">
-            No experiments yet. Use "Add experiment" above.
-          </div>
-        )}
+        <PaperExperiments
+          key={paper.id}
+          paper={paper}
+          experiments={list}
+          allowMulti={allowMulti}
+          activeExpId={activeExpId}
+          onActiveExp={onActiveExp}
+        />
       </div>
     </div>
   );
@@ -299,6 +305,9 @@ function BrowsePage() {
                     onCreated={setSelectedId}
                     scrollRef={attachDataScroll}
                     onScroll={onDataScroll}
+                    allowMulti
+                    activeExpId={selectedExpId}
+                    onActiveExp={setSelectedExpId}
                   />
                 </div>
               )}
@@ -322,6 +331,9 @@ function BrowsePage() {
                       onCreated={setSelectedId}
                       scrollRef={attachDataScroll}
                       onScroll={onDataScroll}
+                      allowMulti={false}
+                      activeExpId={selectedExpId}
+                      onActiveExp={setSelectedExpId}
                     />
                   </Panel>
                 </Group>

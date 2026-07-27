@@ -284,3 +284,22 @@ export function withDefaults(
 
 // A blank value used when an experiment has no stored entry for a field yet.
 export const MISSING_VALUE: FieldValue = { value: null, state: "missing" };
+
+// Turn a raw input string into a FieldValue, parsing numbers and nudging the
+// state between filled/missing as the box gains or loses content. Shared by the
+// single-row editor and the multi-experiment comparison cells.
+export function parseFieldInput(raw: string, field: FieldDef, prev: FieldValue): FieldValue {
+  const trimmed = raw.trim();
+  let parsed: string | number | null = trimmed === "" ? null : trimmed;
+  if (field.type === "number" && trimmed !== "") {
+    const n = Number(trimmed);
+    parsed = Number.isFinite(n) ? n : trimmed;
+  }
+  const nextState: FieldState =
+    trimmed === "" && prev.state === "filled"
+      ? "missing"
+      : trimmed !== "" && prev.state === "missing"
+        ? "filled"
+        : prev.state;
+  return { ...prev, value: parsed, state: nextState };
+}
