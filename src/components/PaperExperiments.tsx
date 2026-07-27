@@ -273,11 +273,22 @@ export function PaperExperiments({
     return first;
   };
 
+  // A data point that is set to the same value across every experiment is a
+  // shared/consistent one — default it to "all experiments".
+  const isSharedAcrossAll = (key: string): boolean => {
+    if (experiments.length < 2) return false;
+    const c = commonValue(key);
+    return !!c && c.state !== "missing";
+  };
+
   const effMode = (key: string): string => {
     const o = rowExp[key];
     if (o === ALL) return ALL;
     if (o && experiments.some((e) => e.id === o)) return o;
-    return base; // default follows the base selection (ALL by default)
+    // Consistent-across-all data points always show as "all experiments"; the
+    // rest follow the base selection (which is "all" by default).
+    if (isSharedAcrossAll(key)) return ALL;
+    return base;
   };
 
   // Resolve how a data-point row reads and writes: an "all experiments" row
