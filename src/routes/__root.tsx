@@ -82,7 +82,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       {
         name: "description",
         content:
-          "Structured database of molten-salt corrosion literature: browse papers by material category, edit per-experiment fields, and export a machine-readable dataset.",
+          "Structured database of molten-salt corrosion literature: browse papers, edit per-experiment fields, filter by alloy type, and export a machine-readable dataset.",
       },
       { name: "author", content: "Scully Group, UVA" },
       { property: "og:title", content: "Corrosion Literature Review" },

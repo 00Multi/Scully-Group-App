@@ -43,6 +43,15 @@ export const DEFAULT_GROUPS: GroupDef[] = [
 export const DEFAULT_FIELDS: FieldDef[] = [
   // Physical
   {
+    key: "alloy_type",
+    label: "Alloy type",
+    group: "physical",
+    type: "select",
+    definition:
+      "Material system / alloy family this experiment belongs to (e.g. Ni-Cr-X, Fe-Ni-Cr). Set per experiment, since one paper can test alloys across several systems. Used to group and filter the browser.",
+    options: ["Ni-Cr-X", "Fe-Ni-Cr", "Ni-Cr", "Fe-Cr"],
+  },
+  {
     key: "temp_c",
     label: "Temp",
     group: "physical",

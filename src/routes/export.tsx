@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useCategories, usePapers, useExperiments } from "@/lib/db";
+import { usePapers, useExperiments } from "@/lib/db";
 import type { Experiment } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
@@ -9,7 +9,15 @@ import { Braces, FileJson, FileSpreadsheet, Printer, Search, Table } from "lucid
 
 type StateFilter = "any" | FieldState;
 
-function expMatchesSearch(
+const ALLOY_TYPE_KEY = "alloy_type";
+const NO_ALLOY = "__none__";
+
+function alloyTypeOf(e: Experiment): string {
+  const v = e.values?.[ALLOY_TYPE_KEY]?.value;
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function paperMatchesSearch(
   exps: Experiment[],
   author: string,
   year: number | null,
@@ -41,7 +49,7 @@ export const Route = createFileRoute("/export")({
       {
         property: "og:description",
         content:
-          "Download the dataset as JSONL, XLSX, or a PDF report — respecting the category filter.",
+          "Download the dataset as JSONL, XLSX, or a PDF report — respecting the alloy-type filter.",
       },
     ],
   }),
@@ -49,19 +57,62 @@ export const Route = createFileRoute("/export")({
 });
 
 function ExportPage() {
-  const { data: categories = [] } = useCategories();
   const { data: papers = [] } = usePapers();
   const { data: experiments = [] } = useExperiments();
   const { groups, fieldDefs } = useSettings();
   const [preview, setPreview] = useState(false);
-  const [selectedCats, setSelectedCats] = useState<Set<string>>(() => new Set());
+  const [selectedAlloys, setSelectedAlloys] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
+  // Data points (fields) to leave OUT of the export. Empty = include everything.
+  const [excludedFields, setExcludedFields] = useState<Set<string>>(() => new Set());
 
-  const catActive = (id: string | null) =>
-    selectedCats.size === 0 ||
-    (id != null && selectedCats.has(id)) ||
-    (id == null && selectedCats.has("__uncat__"));
+  // Only the selected columns/data points go into every export format.
+  const activeFields = useMemo(
+    () => fieldDefs.filter((f) => !excludedFields.has(f.key)),
+    [fieldDefs, excludedFields],
+  );
+  const activeGroups = useMemo(
+    () => groups.filter((g) => activeFields.some((f) => f.group === g.id)),
+    [groups, activeFields],
+  );
+
+  const toggleField = (key: string) =>
+    setExcludedFields((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const setGroupIncluded = (groupId: string, included: boolean) =>
+    setExcludedFields((prev) => {
+      const next = new Set(prev);
+      for (const f of fieldDefs)
+        if (f.group === groupId) {
+          if (included) next.delete(f.key);
+          else next.add(f.key);
+        }
+      return next;
+    });
+
+  // Alloy-type values actually present, unioned with the field's configured
+  // options so empty-but-defined types still appear as filter chips.
+  const alloyOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of experiments) {
+      const a = alloyTypeOf(e);
+      if (a) set.add(a);
+    }
+    const field = fieldDefs.find((f) => f.key === ALLOY_TYPE_KEY);
+    for (const o of field?.options ?? []) set.add(o);
+    return Array.from(set).sort();
+  }, [experiments, fieldDefs]);
+
+  const alloyActive = (e: Experiment) => {
+    if (selectedAlloys.size === 0) return true;
+    const a = alloyTypeOf(e);
+    return selectedAlloys.has(a || NO_ALLOY);
+  };
 
   const expsByPaper = useMemo(() => {
     const m = new Map<string, Experiment[]>();
@@ -72,40 +123,51 @@ function ExportPage() {
     return m;
   }, [experiments]);
 
-  const filteredPapers = useMemo(
-    () =>
-      papers.filter((p) => {
-        if (!catActive(p.category_id)) return false;
-        const exps = expsByPaper.get(p.id) ?? [];
-        if (!expMatchesSearch(exps, p.author, p.year, [p.title, p.doi, p.citation_key], search))
-          return false;
-        return true;
-      }),
-    [papers, selectedCats, search, expsByPaper],
-  );
-  const paperIds = useMemo(() => new Set(filteredPapers.map((p) => p.id)), [filteredPapers]);
+  // Papers whose author/metadata (or any experiment) match the search box.
+  const searchOkPaperIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of papers) {
+      const exps = expsByPaper.get(p.id) ?? [];
+      if (paperMatchesSearch(exps, p.author, p.year, [p.title, p.doi, p.citation_key], search))
+        s.add(p.id);
+    }
+    return s;
+  }, [papers, expsByPaper, search]);
+
+  // Experiment-first filtering: an experiment is included when its paper matches
+  // the search, its alloy type matches the alloy filter, and it satisfies the
+  // field-state filter.
   const filteredExps = useMemo(
     () =>
       experiments.filter((e) => {
-        if (!paperIds.has(e.paper_id)) return false;
-        if (stateFilter !== "any") {
+        if (!searchOkPaperIds.has(e.paper_id)) return false;
+        if (!alloyActive(e)) return false;
+        if (stateFilter !== "any")
           return Object.values(e.values).some((v) => v?.state === stateFilter);
-        }
         return true;
       }),
-    [experiments, paperIds, stateFilter],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [experiments, searchOkPaperIds, selectedAlloys, stateFilter],
+  );
+
+  const filteredPaperIds = useMemo(
+    () => new Set(filteredExps.map((e) => e.paper_id)),
+    [filteredExps],
+  );
+  const filteredPapers = useMemo(
+    () => papers.filter((p) => filteredPaperIds.has(p.id)),
+    [papers, filteredPaperIds],
   );
 
   const exportData: ExportData = {
-    groups,
-    fields: fieldDefs,
+    groups: activeGroups,
+    fields: activeFields,
     papers: filteredPapers,
     experiments: filteredExps,
-    categories,
   };
 
-  const toggleCat = (id: string) =>
-    setSelectedCats((prev) => {
+  const toggleAlloy = (id: string) =>
+    setSelectedAlloys((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -113,13 +175,12 @@ function ExportPage() {
     });
 
   const { schema, records } = useMemo(() => {
-    const catById = new Map(categories.map((c) => [c.id, c]));
     const paperById = new Map(filteredPapers.map((p) => [p.id, p]));
     const schema = {
       $meta: "schema",
       version: 2,
       generated_at: new Date().toISOString(),
-      fields: fieldDefs.map((f) => ({
+      fields: activeFields.map((f) => ({
         key: f.key,
         label: f.label,
         group: f.group,
@@ -133,7 +194,6 @@ function ExportPage() {
     for (const e of filteredExps) {
       const p = paperById.get(e.paper_id);
       if (!p) continue;
-      const cat = p.category_id ? catById.get(p.category_id) : null;
       records.push({
         experiment_id: e.id,
         paper: {
@@ -146,11 +206,11 @@ function ExportPage() {
           journal: p.journal,
           abstract: p.abstract,
           summary: p.summary,
-          material_category: cat?.name ?? null,
         },
         label: e.label,
+        alloy_type: alloyTypeOf(e) || null,
         fields: Object.fromEntries(
-          fieldDefs.map((f) => {
+          activeFields.map((f) => {
             const v = e.values?.[f.key] ?? { value: null, state: "missing" };
             return [
               f.key,
@@ -165,7 +225,7 @@ function ExportPage() {
       });
     }
     return { schema, records };
-  }, [categories, filteredPapers, filteredExps, fieldDefs]);
+  }, [filteredPapers, filteredExps, activeFields]);
 
   const jsonl = useMemo(
     () => [schema, ...records].map((x) => JSON.stringify(x)).join("\n"),
@@ -187,31 +247,32 @@ function ExportPage() {
   const downloadCsv = () => downloadBlob(buildCsv(exportData), "text/csv", "csv");
 
   const recordCount = filteredExps.length;
+  const hasNoAlloy = useMemo(() => experiments.some((e) => !alloyTypeOf(e)), [experiments]);
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
       <h1 className="text-5xl font-serif italic">Export</h1>
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
         Machine-readable <strong>JSONL</strong>, <strong>JSON</strong>, or <strong>CSV</strong> for
-        AI training and reuse, a human-readable <strong>XLSX</strong> reproducing the four column
-        groups, and a printable <strong>PDF report</strong> grouped by material category. All
-        formats respect the filter below — category, search, and field state.
+        AI training and reuse, a human-readable <strong>XLSX</strong> reproducing the column groups,
+        and a printable <strong>PDF report</strong>. All formats respect the filters below — alloy
+        type, search, field state, and which columns / data points to include.
       </p>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-4">
         <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-2">
-          Category filter
+          Alloy-type filter
         </h3>
         <div className="flex flex-wrap gap-2">
           {[
-            ...categories.map((c) => ({ id: c.id, name: c.name })),
-            { id: "__uncat__", name: "Uncategorized" },
-          ].map((c) => {
-            const on = selectedCats.has(c.id);
+            ...alloyOptions.map((a) => ({ id: a, name: a })),
+            ...(hasNoAlloy ? [{ id: NO_ALLOY, name: "No alloy type" }] : []),
+          ].map((a) => {
+            const on = selectedAlloys.has(a.id);
             return (
               <button
-                key={c.id}
-                onClick={() => toggleCat(c.id)}
+                key={a.id}
+                onClick={() => toggleAlloy(a.id)}
                 className={
                   "rounded-full border px-3 py-1 text-xs transition-colors " +
                   (on
@@ -219,10 +280,15 @@ function ExportPage() {
                     : "border-rule text-muted-foreground hover:bg-accent")
                 }
               >
-                {c.name}
+                {a.name}
               </button>
             );
           })}
+          {alloyOptions.length === 0 && !hasNoAlloy && (
+            <span className="text-xs text-muted-foreground italic">
+              No alloy types recorded yet.
+            </span>
+          )}
         </div>
         <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_12rem] gap-2">
           <div className="relative">
@@ -247,9 +313,91 @@ function ExportPage() {
           </select>
         </div>
         <p className="mt-2 text-[11px] text-muted-foreground">
-          {selectedCats.size === 0 && !search && stateFilter === "any"
+          {selectedAlloys.size === 0 && !search && stateFilter === "any"
             ? `All ${filteredPapers.length} papers · ${recordCount} experiments included.`
             : `${filteredPapers.length} papers · ${recordCount} experiments match the current filter.`}
+        </p>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-rule bg-card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+            Columns &amp; data points to include
+          </h3>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-muted-foreground">
+              {activeFields.length}/{fieldDefs.length} data points
+            </span>
+            <button
+              onClick={() => setExcludedFields(new Set())}
+              className="text-copper hover:underline"
+            >
+              All
+            </button>
+            <button
+              onClick={() => setExcludedFields(new Set(fieldDefs.map((f) => f.key)))}
+              className="text-copper hover:underline"
+            >
+              None
+            </button>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {groups.map((g) => {
+            const gf = fieldDefs.filter((f) => f.group === g.id);
+            if (gf.length === 0) return null;
+            const onCount = gf.filter((f) => !excludedFields.has(f.key)).length;
+            const allOn = onCount === gf.length;
+            return (
+              <div key={g.id}>
+                <button
+                  onClick={() => setGroupIncluded(g.id, !allOn)}
+                  className="flex items-center gap-1.5 text-sm font-medium mb-1"
+                  title={allOn ? "Exclude this whole column" : "Include this whole column"}
+                >
+                  <span
+                    className={
+                      "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border text-[9px] " +
+                      (onCount === 0
+                        ? "border-input"
+                        : allOn
+                          ? "bg-primary border-primary text-primary-foreground"
+                          : "bg-primary/40 border-primary text-primary-foreground")
+                    }
+                  >
+                    {onCount > 0 ? "✓" : ""}
+                  </span>
+                  {g.label}
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {onCount}/{gf.length}
+                  </span>
+                </button>
+                <div className="flex flex-wrap gap-1.5 pl-5">
+                  {gf.map((f) => {
+                    const on = !excludedFields.has(f.key);
+                    return (
+                      <button
+                        key={f.key}
+                        onClick={() => toggleField(f.key)}
+                        className={
+                          "rounded-full border px-2.5 py-0.5 text-xs transition-colors " +
+                          (on
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-rule text-muted-foreground hover:bg-accent")
+                        }
+                      >
+                        {f.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          Paper columns (author, year, DOI, summary, notes…) are always included. These toggles
+          control which experiment data points appear in every format below.
         </p>
       </div>
 
@@ -278,7 +426,7 @@ function ExportPage() {
         <FormatCard
           icon={<FileSpreadsheet className="h-5 w-5" />}
           title="XLSX"
-          desc="Four-column-group layout, one row per experiment, values human-readable."
+          desc="Column-group layout, one row per experiment, values human-readable."
           action="Download .xlsx"
           onClick={() =>
             downloadXlsx(
@@ -290,7 +438,7 @@ function ExportPage() {
         <FormatCard
           icon={<Printer className="h-5 w-5" />}
           title="PDF report"
-          desc="Formatted report grouped by category — opens the print dialog (save as PDF)."
+          desc="Formatted report grouped by alloy type — opens the print dialog (save as PDF)."
           action="Print report"
           onClick={() => openPrintReport(exportData)}
         />
@@ -300,7 +448,7 @@ function ExportPage() {
         <div className="grid grid-cols-3 gap-4 text-sm">
           <Stat label="Papers" value={filteredPapers.length} />
           <Stat label="Experiment records" value={recordCount} />
-          <Stat label="Fields per record" value={fieldDefs.length} />
+          <Stat label="Data points per record" value={activeFields.length} />
         </div>
         <button
           onClick={() => setPreview((v) => !v)}

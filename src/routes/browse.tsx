@@ -6,7 +6,7 @@ import { PaperHeader } from "@/components/PaperHeader";
 import { ExperimentEditor } from "@/components/ExperimentEditor";
 import { PdfViewer } from "@/components/PdfViewer";
 import { PdfDropZone } from "@/components/PdfDropZone";
-import { useCategories, usePapers, useExperiments } from "@/lib/db";
+import { usePapers, useExperiments } from "@/lib/db";
 import type { Paper } from "@/lib/db";
 import { SnipProvider } from "@/lib/snip";
 import { Columns2, FileText, Table2 } from "lucide-react";
@@ -29,12 +29,13 @@ export const Route = createFileRoute("/browse")({
       {
         name: "description",
         content:
-          "Browse molten-salt corrosion papers by material category and edit experiment-level data inline, with a split PDF + data view.",
+          "Browse molten-salt corrosion papers and edit experiment-level data inline, filter by alloy type, with a split PDF + data view.",
       },
       { property: "og:title", content: "Browse — Corrosion Literature Review" },
       {
         property: "og:description",
-        content: "Category → Paper → Experiment tree with inline editing and split PDF view.",
+        content:
+          "Paper → Experiment tree with alloy-type filtering, inline editing, and split PDF view.",
       },
     ],
   }),
@@ -107,7 +108,6 @@ function ViewToggle({ mode, setMode }: { mode: ViewMode; setMode: (m: ViewMode) 
 function BrowsePage() {
   const { paper: paperParam, exp: expParam } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { data: categories = [] } = useCategories();
   const { data: papers = [] } = usePapers();
   const { data: experiments = [] } = useExperiments();
 
@@ -200,7 +200,6 @@ function BrowsePage() {
     <SnipProvider>
       <div className="flex max-w-[1600px] mx-auto">
         <BrowseTree
-          categories={categories}
           papers={papers}
           experiments={experiments}
           selectedPaperId={selectedId}

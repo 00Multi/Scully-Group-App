@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Paper } from "@/lib/db";
 import {
-  useCategories,
   useUpdatePaper,
   useDeletePaper,
   useCreateExperiment,
@@ -20,11 +19,9 @@ type Draft = {
   abstract: string;
   summary: string;
   notes: string;
-  category_id: string | null;
 };
 
 export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPosition: number }) {
-  const { data: categories = [] } = useCategories();
   const update = useUpdatePaper();
   const del = useDeletePaper();
   const createExp = useCreateExperiment();
@@ -41,7 +38,6 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
     abstract: p.abstract,
     summary: p.summary,
     notes: p.notes ?? "",
-    category_id: p.category_id,
   });
 
   const [state, setState] = useState<Draft>(draft(paper));
@@ -221,7 +217,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_9rem_10rem] gap-3 px-5 py-3 border-b border-rule/60">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_9rem] gap-3 px-5 py-3 border-b border-rule/60">
         <input
           value={state.author}
           onChange={(e) => setState({ ...state, author: e.target.value })}
@@ -242,18 +238,6 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           inputMode="numeric"
           className="bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
         />
-        <select
-          value={state.category_id ?? ""}
-          onChange={(e) => commit({ category_id: e.target.value || null })}
-          className="bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1"
-        >
-          <option value="">Uncategorized</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
       </div>
 
       <div className="px-5 py-3 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">

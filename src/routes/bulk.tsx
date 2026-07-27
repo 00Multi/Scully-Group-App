@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useCategories, usePapers, useExperiments, useBulkUpdateExperiments } from "@/lib/db";
+import { usePapers, useExperiments, useBulkUpdateExperiments } from "@/lib/db";
 import { useSettings } from "@/lib/settings";
 import { STATE_LABELS, type FieldState, type FieldValue } from "@/lib/fields";
 import { Loader2 } from "lucide-react";
@@ -27,15 +27,21 @@ function valueToString(v: FieldValue | undefined): string {
   return String(v.value);
 }
 
+const ALLOY_TYPE_KEY = "alloy_type";
+
+function alloyTypeOf(e: { values?: Record<string, FieldValue> }): string {
+  const v = e.values?.[ALLOY_TYPE_KEY]?.value;
+  return typeof v === "string" ? v.trim() : "";
+}
+
 function BulkPage() {
-  const { data: categories = [] } = useCategories();
   const { data: papers = [] } = usePapers();
   const { data: experiments = [] } = useExperiments();
   const { fieldDefs } = useSettings();
   const bulk = useBulkUpdateExperiments();
 
   const [fieldKey, setFieldKey] = useState(fieldDefs[0]?.key ?? "");
-  const [catFilter, setCatFilter] = useState<string>("");
+  const [alloyFilter, setAlloyFilter] = useState<string>("");
   const [stateFilter, setStateFilter] = useState<"any" | FieldState>("any");
   const [valueContains, setValueContains] = useState("");
   const [op, setOp] = useState<Op>("set_value");
@@ -49,13 +55,26 @@ function BulkPage() {
   const field = fieldDefs.find((f) => f.key === fieldKey);
   const paperById = useMemo(() => new Map(papers.map((p) => [p.id, p])), [papers]);
 
+  // Alloy-type values present (for the filter dropdown), unioned with the
+  // field's configured options.
+  const alloyOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of experiments) {
+      const a = alloyTypeOf(e);
+      if (a) set.add(a);
+    }
+    const f = fieldDefs.find((x) => x.key === ALLOY_TYPE_KEY);
+    for (const o of f?.options ?? []) set.add(o);
+    return Array.from(set).sort();
+  }, [experiments, fieldDefs]);
+
   // Experiments matching the filters.
   const affected = useMemo(() => {
     if (!field) return [];
     return experiments.filter((e) => {
       const p = paperById.get(e.paper_id);
       if (!p) return false;
-      if (catFilter && p.category_id !== catFilter) return false;
+      if (alloyFilter && alloyTypeOf(e) !== alloyFilter) return false;
       const v = e.values?.[fieldKey];
       const st = v?.state ?? "missing";
       if (stateFilter !== "any" && st !== stateFilter) return false;
@@ -63,7 +82,7 @@ function BulkPage() {
         return false;
       return true;
     });
-  }, [experiments, paperById, field, fieldKey, catFilter, stateFilter, valueContains]);
+  }, [experiments, paperById, field, fieldKey, alloyFilter, stateFilter, valueContains]);
 
   // Compute the new FieldValue for one experiment given the chosen op.
   const computeNext = (v: FieldValue | undefined): FieldValue | null => {
@@ -107,7 +126,11 @@ function BulkPage() {
           return null;
         return { exp: e, before, after };
       })
-      .filter(Boolean) as { exp: (typeof affected)[number]; before?: FieldValue; after: FieldValue }[];
+      .filter(Boolean) as {
+      exp: (typeof affected)[number];
+      before?: FieldValue;
+      after: FieldValue;
+    }[];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [affected, fieldKey, op, setValueText, findText, replaceText, newState, field?.type]);
 
@@ -133,14 +156,16 @@ function BulkPage() {
     <div className="max-w-5xl mx-auto px-6 py-10">
       <h1 className="text-5xl font-serif italic">Bulk edit</h1>
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
-        Change one field across many experiments at once. Filter the rows, choose an operation, review the
-        preview, then confirm. Nothing is written until you press Apply.
+        Change one field across many experiments at once. Filter the rows, choose an operation,
+        review the preview, then confirm. Nothing is written until you press Apply.
       </p>
 
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Target + filters */}
         <div className="rounded-lg border border-rule bg-card p-4 space-y-3">
-          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">Target &amp; filters</h3>
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+            Target &amp; filters
+          </h3>
           <label className="block text-xs text-muted-foreground">
             Field
             <select
@@ -156,16 +181,16 @@ function BulkPage() {
             </select>
           </label>
           <label className="block text-xs text-muted-foreground">
-            Category
+            Alloy type
             <select
-              value={catFilter}
-              onChange={(e) => setCatFilter(e.target.value)}
+              value={alloyFilter}
+              onChange={(e) => setAlloyFilter(e.target.value)}
               className="mt-1 w-full bg-transparent border border-input rounded px-2 py-1.5 text-sm"
             >
-              <option value="">All categories</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
+              <option value="">All alloy types</option>
+              {alloyOptions.map((a) => (
+                <option key={a} value={a}>
+                  {a}
                 </option>
               ))}
             </select>
@@ -201,7 +226,9 @@ function BulkPage() {
 
         {/* Operation */}
         <div className="rounded-lg border border-rule bg-card p-4 space-y-3">
-          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">Operation</h3>
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+            Operation
+          </h3>
           <div className="flex flex-wrap gap-2">
             {(
               [
@@ -215,7 +242,9 @@ function BulkPage() {
                 onClick={() => setOp(k)}
                 className={
                   "rounded border px-2.5 py-1 text-xs " +
-                  (op === k ? "border-primary bg-primary text-primary-foreground" : "border-rule hover:bg-accent")
+                  (op === k
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-rule hover:bg-accent")
                 }
               >
                 {label}
@@ -335,7 +364,9 @@ function BulkPage() {
                     <span className="font-serif italic">{p?.citation_key || "Untitled"}</span>
                     <span className="text-muted-foreground text-xs"> · {c.exp.label}</span>
                   </div>
-                  <div className="font-mono text-xs text-muted-foreground truncate">{describe(c.before)}</div>
+                  <div className="font-mono text-xs text-muted-foreground truncate">
+                    {describe(c.before)}
+                  </div>
                   <div className="font-mono text-xs text-copper truncate">{describe(c.after)}</div>
                 </div>
               );
