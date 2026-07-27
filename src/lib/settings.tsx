@@ -1,4 +1,14 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types";
 import {
   DEFAULT_SCHEMA,
   fieldsByGroup as computeFieldsByGroup,
@@ -106,20 +116,113 @@ function loadTheme(): Theme {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+// The schema is shared across all browsers/deploys via a single Supabase row, so
+// custom labels, definitions, and dropdown options survive a fresh deployment.
+// localStorage remains a fast cache and offline fallback.
+const SCHEMA_ROW_ID = "default";
+
+async function fetchRemoteSchema(): Promise<Schema | null> {
+  const { data, error } = await supabase
+    .from("app_schema")
+    .select("schema")
+    .eq("id", SCHEMA_ROW_ID)
+    .maybeSingle();
+  if (error) throw error;
+  const raw = data?.schema;
+  return raw && isValidSchema(raw) ? (raw as Schema) : null;
+}
+
+async function saveRemoteSchema(schema: Schema): Promise<boolean> {
+  const { error } = await supabase.from("app_schema").upsert({
+    id: SCHEMA_ROW_ID,
+    schema: schema as unknown as Json,
+    updated_at: new Date().toISOString(),
+  });
+  return !error;
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [schema, setSchema] = useState<Schema>(() => cloneDefaultSchema());
   const [theme, setThemeState] = useState<Theme>("light");
   const [hydrated, setHydrated] = useState(false);
 
+  // JSON of the schema last known to match the Supabase row, so we don't echo a
+  // just-loaded value back, and a flag that the initial remote load has run (so
+  // we never push the local/default schema before reading the shared one).
+  const remoteSyncedRef = useRef<string | null>(null);
+  const remoteLoadedRef = useRef(false);
+
   useEffect(() => {
-    setSchema(loadSchema());
+    // 1. Instant paint from the local cache (also the offline fallback).
+    const local = loadSchema();
+    setSchema(local);
     setThemeState(loadTheme());
     setHydrated(true);
+
+    // 2. Reconcile with the shared schema in Supabase.
+    let cancelled = false;
+    const defaultJson = JSON.stringify(cloneDefaultSchema());
+    const localJson = JSON.stringify(local);
+    const localIsCustom = localJson !== defaultJson;
+
+    const applyRemote = (remote: Schema) => {
+      const json = JSON.stringify(remote);
+      remoteSyncedRef.current = json;
+      setSchema(remote);
+      try {
+        window.localStorage.setItem(LS_SCHEMA, json);
+      } catch {
+        /* ignore quota errors */
+      }
+    };
+    const pushLocal = async () => {
+      if (await saveRemoteSchema(local)) remoteSyncedRef.current = localJson;
+    };
+
+    (async () => {
+      try {
+        const remote = await fetchRemoteSchema();
+        if (cancelled) return;
+        if (remote) {
+          const remoteIsCustom = JSON.stringify(remote) !== defaultJson;
+          // Prefer the shared schema, EXCEPT when it's still the default while
+          // this browser holds real customizations — then our edits win and are
+          // pushed up, so a default seed can't wipe out existing custom labels,
+          // definitions, or dropdown options.
+          if (remoteIsCustom || !localIsCustom) applyRemote(remote);
+          else await pushLocal();
+        } else {
+          // No shared schema yet — seed it from whatever this browser has.
+          await pushLocal();
+        }
+      } catch {
+        /* offline or unreachable — keep the local cache */
+      } finally {
+        remoteLoadedRef.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    window.localStorage.setItem(LS_SCHEMA, JSON.stringify(schema));
+    const json = JSON.stringify(schema);
+    try {
+      window.localStorage.setItem(LS_SCHEMA, json);
+    } catch {
+      /* ignore quota errors */
+    }
+    // Push edits to the shared row (debounced), but only after the initial
+    // remote load, and only when the value actually differs from the remote.
+    if (!remoteLoadedRef.current || json === remoteSyncedRef.current) return;
+    const t = setTimeout(() => {
+      void saveRemoteSchema(schema).then((ok) => {
+        if (ok) remoteSyncedRef.current = json;
+      });
+    }, 600);
+    return () => clearTimeout(t);
   }, [schema, hydrated]);
 
   useEffect(() => {

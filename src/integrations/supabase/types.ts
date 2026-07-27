@@ -8,6 +8,24 @@ export type Database = {
   };
   public: {
     Tables: {
+      app_schema: {
+        Row: {
+          id: string;
+          schema: Json;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          schema: Json;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          schema?: Json;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
       experiments: {
         Row: {
           created_at: string;
