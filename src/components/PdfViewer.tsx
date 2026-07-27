@@ -17,22 +17,14 @@ import {
 // are awkward to import in this setup).
 type PdfViewport = { width: number; height: number };
 type PdfRenderTask = { promise: Promise<void>; cancel: () => void };
-type PdfTextContent = unknown;
 type PdfPage = {
   getViewport: (o: { scale: number }) => PdfViewport;
   render: (o: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }) => PdfRenderTask;
-  getTextContent: () => Promise<PdfTextContent>;
 };
 type PdfDoc = { numPages: number; getPage: (n: number) => Promise<PdfPage> };
-type PdfTextLayer = { render: () => Promise<void>; cancel?: () => void };
 type Pdfjs = {
   GlobalWorkerOptions: { workerSrc: string };
   getDocument: (src: string) => { promise: Promise<PdfDoc> };
-  TextLayer: new (o: {
-    textContentSource: PdfTextContent;
-    container: HTMLElement;
-    viewport: PdfViewport;
-  }) => PdfTextLayer;
 };
 
 // pdf.js is browser-only; import lazily so it never runs during SSR.
@@ -63,14 +55,12 @@ export function PdfViewer({ paper }: { paper: Paper }) {
   const snip = useSnip();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const textLayerRef = useRef<HTMLDivElement>(null);
   const docRef = useRef<PdfDoc | null>(null);
   const renderTaskRef = useRef<PdfRenderTask | null>(null);
 
   const [numPages, setNumPages] = useState(0);
   const [page, setPage] = useState(1);
   const [scale, setScale] = useState(1.2);
-  const [dims, setDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,7 +110,6 @@ export function PdfViewer({ paper }: { paper: Paper }) {
         if (!ctx) return;
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        setDims({ w: viewport.width, h: viewport.height });
         if (renderTaskRef.current) {
           try {
             renderTaskRef.current.cancel();
@@ -131,27 +120,6 @@ export function PdfViewer({ paper }: { paper: Paper }) {
         const task = pg.render({ canvasContext: ctx, viewport });
         renderTaskRef.current = task;
         await task.promise;
-        if (cancelled) return;
-
-        // Overlay a selectable text layer so users can copy text from the PDF.
-        const container = textLayerRef.current;
-        if (container) {
-          container.replaceChildren();
-          container.style.setProperty("--scale-factor", String(scale));
-          try {
-            const pdfjs = await getPdfjs();
-            const textContent = await pg.getTextContent();
-            if (cancelled) return;
-            const textLayer = new pdfjs.TextLayer({
-              textContentSource: textContent,
-              container,
-              viewport,
-            });
-            await textLayer.render();
-          } catch {
-            /* text layer is best-effort; ignore failures */
-          }
-        }
       } catch (e) {
         const name = e instanceof Error ? e.name : "";
         if (!cancelled && name !== "RenderingCancelledException") {
@@ -308,21 +276,15 @@ export function PdfViewer({ paper }: { paper: Paper }) {
           <div className="self-center text-sm text-destructive max-w-sm text-center">{error}</div>
         )}
         {!error && (
-          <div
-            className="relative h-max shadow-md bg-white"
-            style={dims.w ? { width: dims.w, height: dims.h } : undefined}
-          >
+          <div className="relative h-max">
             <canvas
               ref={canvasRef}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              className={"block " + (snip.active ? "cursor-crosshair" : "")}
-            />
-            <div
-              ref={textLayerRef}
-              className={"textLayer" + (snip.active ? " pointer-events-none" : "")}
-              aria-hidden={snip.active}
+              className={
+                "shadow-md bg-white max-w-full h-auto " + (snip.active ? "cursor-crosshair" : "")
+              }
             />
             {drag && (
               <div
