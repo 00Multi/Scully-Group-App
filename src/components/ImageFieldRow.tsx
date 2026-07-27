@@ -20,11 +20,20 @@ interface Props {
   experimentId: string;
   onChange: (next: FieldValue) => void;
   onDelete?: () => void;
+  expControl?: React.ReactNode;
 }
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
 
-export function ImageFieldRow({ field, value, paperId, experimentId, onChange, onDelete }: Props) {
+export function ImageFieldRow({
+  field,
+  value,
+  paperId,
+  experimentId,
+  onChange,
+  onDelete,
+  expControl,
+}: Props) {
   const upload = useUploadExperimentImage();
   const snip = useSnip();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -128,6 +137,7 @@ export function ImageFieldRow({ field, value, paperId, experimentId, onChange, o
       </div>
 
       <div className="flex items-center gap-1 pt-0.5 shrink-0">
+        {expControl}
         <DropdownMenu>
           <DropdownMenuTrigger className="focus:outline-none">
             <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
