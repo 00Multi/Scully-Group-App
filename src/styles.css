@@ -68,7 +68,7 @@
   --popover: oklch(0.99 0.005 85);
   --popover-foreground: var(--ink);
 
-  --primary: oklch(0.52 0.13 45);       /* copper */
+  --primary: oklch(0.52 0.13 45); /* copper */
   --primary-foreground: oklch(0.985 0.005 85);
   --secondary: oklch(0.93 0.012 75);
   --secondary-foreground: var(--ink);
@@ -86,10 +86,10 @@
   --input: oklch(0.9 0.012 75);
   --ring: oklch(0.55 0.14 45);
 
-  --state-filled: oklch(0.55 0.11 155);   /* verdant green */
-  --state-missing: oklch(0.7 0.02 60);    /* neutral grey */
-  --state-na: oklch(0.5 0.015 60);        /* deeper grey */
-  --state-check: oklch(0.65 0.16 65);     /* amber */
+  --state-filled: oklch(0.55 0.11 155); /* verdant green */
+  --state-missing: oklch(0.7 0.02 60); /* neutral grey */
+  --state-na: oklch(0.5 0.015 60); /* deeper grey */
+  --state-check: oklch(0.65 0.16 65); /* amber */
 
   --chart-1: oklch(0.55 0.14 45);
   --chart-2: oklch(0.62 0.08 175);
@@ -139,13 +139,17 @@
   * {
     border-color: var(--color-border);
   }
-  html, body {
+  html,
+  body {
     background-color: var(--color-background);
     color: var(--color-foreground);
     font-family: var(--font-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
-  h1, h2, h3, .display {
+  h1,
+  h2,
+  h3,
+  .display {
     font-family: var(--font-serif);
     letter-spacing: -0.01em;
     font-weight: 400;
@@ -157,4 +161,49 @@
 
 @utility field-tag {
   @apply inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-mono;
+}
+
+/*
+ * pdf.js text layer — transparent, absolutely-positioned spans laid over the
+ * rendered canvas so text can be selected and copied. Adapted from pdf.js's
+ * pdf_viewer.css; positions come from --scale-factor set per render.
+ */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: currentColor;
+  z-index: 1;
+}
+.textLayer span,
+.textLayer br {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.textLayer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: 0;
+  cursor: default;
+  user-select: none;
+}
+.textLayer .endOfContent.active {
+  top: 0;
+}
+.textLayer ::selection {
+  background: color-mix(in oklch, var(--copper) 45%, transparent);
 }

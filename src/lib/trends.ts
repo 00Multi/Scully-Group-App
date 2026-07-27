@@ -4,6 +4,7 @@
 
 import type { Experiment, Paper } from "./db";
 import type { FieldDef, GroupDef } from "./fields";
+import { readInstitutionRefs, type Institution } from "./ror";
 
 export interface Bucket {
   label: string;
@@ -120,6 +121,33 @@ export function paperFieldDistribution(
   return topWithOther(Array.from(m.entries()), topN);
 }
 
+export interface InstitutionCount extends Institution {
+  count: number;
+}
+
+// Papers per institution, enriched with the best country/domain seen for that
+// name across the dataset (so a flag/logo can be shown).
+export function institutionCounts(papers: Paper[]): InstitutionCount[] {
+  const m = new Map<string, InstitutionCount>();
+  for (const p of papers) {
+    for (const inst of readInstitutionRefs(p)) {
+      const key = inst.name.toLowerCase();
+      const prev = m.get(key);
+      if (prev) {
+        prev.count++;
+        if (!prev.domain && inst.domain) prev.domain = inst.domain;
+        if (!prev.countryCode && inst.countryCode) {
+          prev.countryCode = inst.countryCode;
+          prev.countryName = inst.countryName;
+        }
+      } else {
+        m.set(key, { ...inst, count: 1 });
+      }
+    }
+  }
+  return Array.from(m.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
 export function papersPerYear(papers: Paper[]): Bucket[] {
   const m = new Map<number, number>();
   for (const p of papers) if (p.year != null) m.set(p.year, (m.get(p.year) ?? 0) + 1);
@@ -160,11 +188,8 @@ export function buildTrendSections(
       title: "Journals",
       data: paperFieldDistribution(papers, (p) => p.journal),
     },
-    {
-      id: "meta:institution",
-      title: "Institutions",
-      data: paperFieldDistribution(papers, (p) => p.institution, { split: ";" }),
-    },
+    // Institutions are shown as a dedicated panel (with logos/flags) on the
+    // Trends page, so they are intentionally not duplicated as a bar chart here.
     { id: "meta:author", title: "Authors", data: paperFieldDistribution(papers, (p) => p.author) },
     { id: "meta:keywords", title: "Keywords", data: keywordDistribution(papers) },
   ].filter((t) => t.data.length > 0);

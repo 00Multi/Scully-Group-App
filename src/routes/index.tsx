@@ -325,8 +325,10 @@ function SchemaManager() {
         <div>
           <h2 className="text-2xl font-serif italic">Columns &amp; data points</h2>
           <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-            Rename or add columns, and add, edit, or delete the data points inside each one. Changes
-            apply to every experiment and are saved automatically in this browser.
+            Rename or add columns, and add, edit, move, or delete the data points inside each one.
+            Use a data point's <span className="font-medium">Column</span> dropdown to move it to
+            another column. Changes apply to every experiment and are saved automatically in this
+            browser.
           </p>
         </div>
         <button
@@ -375,10 +377,11 @@ function SchemaManager() {
               </button>
             </div>
 
-            <div className="hidden md:grid grid-cols-[1fr_5rem_6rem_2fr_auto] gap-3 px-4 py-2 border-b border-rule/60 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            <div className="hidden md:grid grid-cols-[1fr_5rem_6rem_7rem_2fr_auto] gap-3 px-4 py-2 border-b border-rule/60 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
               <div>Data point</div>
               <div>Type</div>
               <div>Unit</div>
+              <div>Column</div>
               <div>Definition (tooltip)</div>
               <div></div>
             </div>
@@ -386,7 +389,7 @@ function SchemaManager() {
             {(fieldsByGroup[group.id] ?? []).map((f) => (
               <div
                 key={f.key}
-                className="grid grid-cols-1 md:grid-cols-[1fr_5rem_6rem_2fr_auto] gap-2 md:gap-3 px-4 py-2 border-b border-rule/60 last:border-0 items-start"
+                className="grid grid-cols-1 md:grid-cols-[1fr_5rem_6rem_7rem_2fr_auto] gap-2 md:gap-3 px-4 py-2 border-b border-rule/60 last:border-0 items-start"
               >
                 <input
                   value={f.label}
@@ -414,6 +417,21 @@ function SchemaManager() {
                   className="bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
                   aria-label="Unit"
                 />
+                <select
+                  value={f.group}
+                  onChange={(e) => {
+                    if (e.target.value !== f.group) updateField(f.key, { group: e.target.value });
+                  }}
+                  className="bg-transparent border-b border-input focus:border-primary focus:outline-none text-xs py-1"
+                  aria-label="Move data point to column"
+                  title="Move this data point to another column (applies to every experiment)"
+                >
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.label}
+                    </option>
+                  ))}
+                </select>
                 <div className="flex flex-col gap-1">
                   <textarea
                     value={f.definition}
