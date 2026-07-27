@@ -22,14 +22,22 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Columns3, Copy, Plus, Rows3, Trash2 } from "lucide-react";
+import { ChevronDown, Columns3, Copy, Layers, Plus, Rows3, Trash2 } from "lucide-react";
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
 const VIEW_KEY = "paper.exp.view.v1";
+// Sentinel for the "all experiments" row mode — a data point shared across every
+// experiment in the paper. This is the default for every data point.
+const ALL = "__all__";
 
 type ViewMode = "single" | "multi";
 
 const expName = (e: Experiment, i: number) => e.label?.trim() || `Experiment ${i + 1}`;
+
+const fvEqual = (a: FieldValue, b: FieldValue) =>
+  a.state === b.state &&
+  (a.value ?? null) === (b.value ?? null) &&
+  (a.note ?? null) === (b.note ?? null);
 
 // ---- A small coloured dot for an experiment ----
 function Dot({ i, className = "" }: { i: number; className?: string }) {
@@ -41,7 +49,9 @@ function Dot({ i, className = "" }: { i: number; className?: string }) {
   );
 }
 
-// ---- Per-row selector: which experiment this data point currently shows ----
+// ---- Per-row selector: which experiment(s) this data point applies to ----
+// "All experiments" (the default) is rendered in a neutral grey so shared data
+// points recede next to the colour-coded, experiment-specific ones.
 function ExperimentSelect({
   experiments,
   valueId,
@@ -51,19 +61,31 @@ function ExperimentSelect({
   valueId: string;
   onChange: (id: string) => void;
 }) {
+  const isAll = valueId === ALL;
   const idx = experiments.findIndex((e) => e.id === valueId);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         className="focus:outline-none"
-        title="Which experiment this value belongs to — change to view another"
+        title="Which experiment(s) this data point applies to"
       >
-        <span className="inline-flex items-center gap-1 rounded border border-rule px-1.5 py-0.5 text-[10px] font-mono hover:bg-accent">
-          <Dot i={idx} />E{idx + 1}
+        <span
+          className={
+            "inline-flex items-center gap-1 rounded border border-rule px-1.5 py-0.5 text-[10px] font-mono hover:bg-accent " +
+            (isAll ? "text-muted-foreground" : "")
+          }
+        >
+          {isAll ? <Layers className="h-3 w-3 text-muted-foreground" /> : <Dot i={idx} />}
+          {isAll ? "All" : `E${idx + 1}`}
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onChange(ALL)} className="gap-2 text-muted-foreground">
+          <Layers className="h-3.5 w-3.5" />
+          All experiments
+        </DropdownMenuItem>
+        {experiments.length > 0 && <div className="my-1 h-px bg-rule/60" />}
         {experiments.map((e, i) => (
           <DropdownMenuItem key={e.id} onSelect={() => onChange(e.id)} className="gap-2">
             <Dot i={i} />
@@ -160,7 +182,7 @@ export function PaperExperiments({
   experiments: Experiment[];
   allowMulti: boolean;
   activeExpId: string | null;
-  onActiveExp: (id: string) => void;
+  onActiveExp: (id: string | null) => void;
 }) {
   const { groups, fieldsByGroup, addField, deleteField } = useSettings();
   const updateExp = useUpdateExperiment();
@@ -230,23 +252,54 @@ export function PaperExperiments({
   };
   const valueOf = (expId: string, key: string): FieldValue => drafts[expId]?.[key] ?? MISSING_VALUE;
 
-  // The active experiment for the single view (falls back to the first).
-  const activeId = experiments.some((e) => e.id === activeExpId)
-    ? (activeExpId as string)
-    : (experiments[0]?.id ?? null);
-  const activeIndex = experiments.findIndex((e) => e.id === activeId);
+  // The base selection: "all experiments" (default) or a specific experiment
+  // (when one is picked in the tree / a chip). It's the default mode for every
+  // data-point row.
+  const base = experiments.some((e) => e.id === activeExpId) ? (activeExpId as string) : ALL;
+  const baseIsExp = base !== ALL;
+  const baseIndex = experiments.findIndex((e) => e.id === base);
 
-  // Per-row override: which experiment each data point row shows (defaults to
-  // the active one). Overrides for deleted experiments quietly fall back.
+  // Per-row overrides: which experiment (or ALL) each data point row applies to.
   const [rowExp, setRowExp] = useState<Record<string, string>>({});
-  // Switching the active experiment cleanly resets rows to it; the per-row
-  // dropdown is for ad-hoc cross-referencing after that.
-  useEffect(() => {
-    setRowExp({});
-  }, [activeId]);
-  const effExp = (key: string) => {
+  const setRowMode = (key: string, val: string) => setRowExp((r) => ({ ...r, [key]: val }));
+
+  // The value shared across every experiment for a field, or null if they differ.
+  const commonValue = (key: string): FieldValue | null => {
+    if (experiments.length === 0) return null;
+    const first = valueOf(experiments[0].id, key);
+    for (let i = 1; i < experiments.length; i++) {
+      if (!fvEqual(valueOf(experiments[i].id, key), first)) return null;
+    }
+    return first;
+  };
+
+  const effMode = (key: string): string => {
     const o = rowExp[key];
-    return o && experiments.some((e) => e.id === o) ? o : (activeId as string);
+    if (o === ALL) return ALL;
+    if (o && experiments.some((e) => e.id === o)) return o;
+    return base; // default follows the base selection (ALL by default)
+  };
+
+  // Resolve how a data-point row reads and writes: an "all experiments" row
+  // shows the shared value and edits every experiment at once; a specific row
+  // reads/writes just that experiment.
+  const resolveRow = (key: string) => {
+    const mode = effMode(key);
+    if (mode === ALL) {
+      const common = commonValue(key);
+      return {
+        mode: ALL,
+        value: common ?? valueOf(experiments[0]?.id ?? "", key),
+        commit: (v: FieldValue) => experiments.forEach((e) => setField(e.id, key, v)),
+        imageExpId: baseIsExp ? base : (experiments[0]?.id ?? ""),
+      };
+    }
+    return {
+      mode,
+      value: valueOf(mode, key),
+      commit: (v: FieldValue) => setField(mode, key, v),
+      imageExpId: mode,
+    };
   };
 
   const orderedGroups = useMemo(
@@ -272,12 +325,11 @@ export function PaperExperiments({
   };
   const remove = (e: Experiment) => {
     if (!confirm("Delete this experiment row?")) return;
-    const next = experiments.find((x) => x.id !== e.id);
     deleteExp.mutate(e.id);
-    if (e.id === activeId && next) onActiveExp(next.id);
+    if (e.id === base) onActiveExp(null);
   };
-  const renameActive = (label: string) => {
-    if (activeId) updateExp.mutate({ id: activeId, patch: { label } });
+  const renameBase = (label: string) => {
+    if (baseIsExp) updateExp.mutate({ id: base, patch: { label } });
   };
 
   if (experiments.length === 0) {
@@ -295,15 +347,28 @@ export function PaperExperiments({
   }
 
   return (
-    <div id={activeId ? `exp-${activeId}` : undefined} className="scroll-mt-20">
+    <div id={baseIsExp ? `exp-${base}` : undefined} className="scroll-mt-20">
       {/* Toolbar: experiment switcher + view toggle */}
       <div className="rounded-t-lg border border-rule bg-card/70 px-3 py-2 flex flex-wrap items-center gap-2">
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono mr-1">
           {experiments.length} exp{experiments.length === 1 ? "" : "s"}
         </span>
         <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
+          {/* Neutral "All experiments" chip — the default focus. */}
+          <button
+            onClick={() => onActiveExp(null)}
+            className={
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors " +
+              (mode === "single" && !baseIsExp
+                ? "border-transparent bg-muted-foreground/15 text-foreground"
+                : "border-rule text-muted-foreground hover:bg-accent")
+            }
+            title="Show every experiment's shared values"
+          >
+            <Layers className="h-3 w-3" /> All
+          </button>
           {experiments.map((e, i) => {
-            const on = mode === "single" && e.id === activeId;
+            const on = mode === "single" && e.id === base;
             return (
               <button
                 key={e.id}
@@ -358,24 +423,22 @@ export function PaperExperiments({
 
       {mode === "single" ? (
         <SingleView
-          key={activeId ?? "none"}
+          key={base}
           paper={paper}
           experiments={experiments}
-          activeId={activeId!}
-          activeIndex={activeIndex}
+          base={base}
+          baseIndex={baseIndex}
           orderedGroups={orderedGroups}
           fieldsByGroup={fieldsByGroup}
-          valueOf={valueOf}
-          setField={setField}
-          effExp={effExp}
-          setRowExp={(key, id) => setRowExp((r) => ({ ...r, [key]: id }))}
-          rename={renameActive}
+          resolveRow={resolveRow}
+          setRowMode={setRowMode}
+          rename={renameBase}
           duplicate={() => {
-            const e = experiments[activeIndex];
-            if (e) duplicate(e, activeIndex);
+            const e = experiments[baseIndex];
+            if (e) duplicate(e, baseIndex);
           }}
           onDeleteExp={() => {
-            const e = experiments[activeIndex];
+            const e = experiments[baseIndex];
             if (e) remove(e);
           }}
           addField={addField}
@@ -402,14 +465,12 @@ export function PaperExperiments({
 function SingleView({
   paper,
   experiments,
-  activeId,
-  activeIndex,
+  base,
+  baseIndex,
   orderedGroups,
   fieldsByGroup,
-  valueOf,
-  setField,
-  effExp,
-  setRowExp,
+  resolveRow,
+  setRowMode,
   rename,
   duplicate,
   onDeleteExp,
@@ -418,56 +479,70 @@ function SingleView({
 }: {
   paper: Paper;
   experiments: Experiment[];
-  activeId: string;
-  activeIndex: number;
+  base: string;
+  baseIndex: number;
   orderedGroups: { id: string; label: string }[];
   fieldsByGroup: Record<string, FieldDef[]>;
-  valueOf: (expId: string, key: string) => FieldValue;
-  setField: (expId: string, key: string, v: FieldValue) => void;
-  effExp: (key: string) => string;
-  setRowExp: (key: string, id: string) => void;
+  resolveRow: (key: string) => {
+    mode: string;
+    value: FieldValue;
+    commit: (v: FieldValue) => void;
+    imageExpId: string;
+  };
+  setRowMode: (key: string, id: string) => void;
   rename: (label: string) => void;
   duplicate: () => void;
   onDeleteExp: () => void;
   addField: (groupId: string) => void;
   deleteField: (key: string) => void;
 }) {
-  const active = experiments[activeIndex];
+  const baseIsExp = base !== ALL;
+  const active = experiments[baseIndex];
   const [label, setLabel] = useState(active?.label ?? "");
   useEffect(() => {
     setLabel(active?.label ?? "");
-  }, [activeId, active?.label]);
+  }, [base, active?.label]);
 
   return (
     <div className="@container rounded-b-lg border border-t-0 border-rule bg-card">
-      <header
-        className="flex items-center gap-2 px-5 py-3 border-b border-rule"
-        style={{ boxShadow: `inset 3px 0 0 ${expColor(activeIndex)}` }}
-      >
-        <Dot i={activeIndex} />
-        <input
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          onBlur={() => label !== active?.label && rename(label)}
-          placeholder={`Experiment ${activeIndex + 1}`}
-          className="flex-1 bg-transparent text-lg font-serif italic focus:outline-none min-w-0"
-        />
-        <button
-          onClick={duplicate}
-          className="text-muted-foreground hover:text-copper transition-colors p-1"
-          title="Duplicate this experiment"
-          aria-label="Duplicate experiment"
+      {baseIsExp ? (
+        <header
+          className="flex items-center gap-2 px-5 py-3 border-b border-rule"
+          style={{ boxShadow: `inset 3px 0 0 ${expColor(baseIndex)}` }}
         >
-          <Copy className="h-4 w-4" />
-        </button>
-        <button
-          onClick={onDeleteExp}
-          className="text-muted-foreground hover:text-destructive transition-colors p-1"
-          aria-label="Delete experiment"
-        >
-          <Trash2 className="h-4 w-4" />
-        </button>
-      </header>
+          <Dot i={baseIndex} />
+          <input
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={() => label !== active?.label && rename(label)}
+            placeholder={`Experiment ${baseIndex + 1}`}
+            className="flex-1 bg-transparent text-lg font-serif italic focus:outline-none min-w-0"
+          />
+          <button
+            onClick={duplicate}
+            className="text-muted-foreground hover:text-copper transition-colors p-1"
+            title="Duplicate this experiment"
+            aria-label="Duplicate experiment"
+          >
+            <Copy className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onDeleteExp}
+            className="text-muted-foreground hover:text-destructive transition-colors p-1"
+            aria-label="Delete experiment"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </header>
+      ) : (
+        <header className="flex items-center gap-2 px-5 py-3 border-b border-rule text-muted-foreground">
+          <Layers className="h-4 w-4" />
+          <span className="text-lg font-serif italic text-foreground">All experiments</span>
+          <span className="text-[11px]">
+            · edits apply to every experiment; switch a row to a colour to edit just that one
+          </span>
+        </header>
+      )}
 
       <div className="grid grid-cols-1 @3xl:grid-cols-2 @6xl:grid-cols-3 gap-x-8 gap-y-0 px-5 py-3">
         {orderedGroups.map((group) => (
@@ -477,13 +552,12 @@ function SingleView({
             </h4>
             <div>
               {(fieldsByGroup[group.id] ?? []).map((f) => {
-                const exp = effExp(f.key);
-                const value = valueOf(exp, f.key);
+                const row = resolveRow(f.key);
                 const selector = (
                   <ExperimentSelect
                     experiments={experiments}
-                    valueId={exp}
-                    onChange={(id) => setRowExp(f.key, id)}
+                    valueId={row.mode}
+                    onChange={(id) => setRowMode(f.key, id)}
                   />
                 );
                 const onDelete = () => {
@@ -498,10 +572,10 @@ function SingleView({
                   <ImageFieldRow
                     key={f.key}
                     field={f}
-                    value={value}
+                    value={row.value}
                     paperId={paper.id}
-                    experimentId={exp}
-                    onChange={(next) => setField(exp, f.key, next)}
+                    experimentId={row.imageExpId}
+                    onChange={row.commit}
                     onDelete={onDelete}
                     expControl={selector}
                   />
@@ -509,8 +583,8 @@ function SingleView({
                   <FieldRow
                     key={f.key}
                     field={f}
-                    value={value}
-                    onChange={(next) => setField(exp, f.key, next)}
+                    value={row.value}
+                    onChange={row.commit}
                     onDelete={onDelete}
                     expControl={selector}
                   />
@@ -531,7 +605,7 @@ function SingleView({
       </div>
 
       <footer className="px-5 py-2 border-t border-rule/60 text-[10px] text-muted-foreground font-mono flex justify-between">
-        <span>Autosaved · one experiment shown — switch above or use each row's selector</span>
+        <span>Autosaved · each row's selector sets which experiment(s) it applies to</span>
         <span>{paper.citation_key || "Untitled paper"}</span>
       </footer>
     </div>

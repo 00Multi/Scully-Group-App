@@ -88,7 +88,7 @@ function DataPane({
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   allowMulti: boolean;
   activeExpId: string | null;
-  onActiveExp: (id: string) => void;
+  onActiveExp: (id: string | null) => void;
 }) {
   const list = exps ?? [];
   return (
