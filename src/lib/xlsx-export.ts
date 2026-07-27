@@ -1,8 +1,8 @@
-// Human-readable XLSX export reproducing the four-column-group layout, and a
-// printable PDF report grouped by material category. See PRD §F8.
+// Human-readable XLSX export reproducing the column-group layout, and a
+// printable PDF report grouped by alloy type. See PRD §F8.
 
 import * as XLSX from "xlsx";
-import type { Category, Experiment, Paper } from "./db";
+import type { Experiment, Paper } from "./db";
 import type { FieldDef, FieldValue, GroupDef } from "./fields";
 
 export interface ExportData {
@@ -10,7 +10,13 @@ export interface ExportData {
   fields: FieldDef[];
   papers: Paper[];
   experiments: Experiment[];
-  categories: Category[];
+}
+
+const ALLOY_TYPE_KEY = "alloy_type";
+
+function alloyTypeOf(e: Experiment): string {
+  const v = e.values?.[ALLOY_TYPE_KEY]?.value;
+  return typeof v === "string" ? v.trim() : "";
 }
 
 function displayValue(v: FieldValue | undefined): string {
@@ -27,11 +33,14 @@ function fieldHeader(f: FieldDef): string {
 }
 
 export function downloadXlsx(data: ExportData, filename: string) {
-  const catById = new Map(data.categories.map((c) => [c.id, c.name]));
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
 
-  const paperCols = ["Author", "Year", "Category", "Title", "DOI", "Journal", "Experiment"];
-  const orderedFields = data.groups.flatMap((g) => data.fields.filter((f) => f.group === g.id));
+  const paperCols = ["Author", "Year", "Alloy type", "Title", "DOI", "Journal", "Experiment"];
+  // The alloy type is emitted as a dedicated paper-level column, so drop it from
+  // the group-band fields to avoid printing it twice.
+  const orderedFields = data.groups.flatMap((g) =>
+    data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
+  );
   const tailCols = ["Summary", "Notes"];
 
   // Row 1: group band. Row 2: column labels.
@@ -59,7 +68,7 @@ export function downloadXlsx(data: ExportData, filename: string) {
     const row: (string | number | null)[] = [
       p.author,
       p.year ?? "",
-      (p.category_id && catById.get(p.category_id)) || "",
+      alloyTypeOf(exp),
       p.title,
       p.doi,
       p.journal ?? "",
@@ -97,14 +106,15 @@ function csvCell(s: unknown): string {
 }
 
 export function buildCsv(data: ExportData): string {
-  const catById = new Map(data.categories.map((c) => [c.id, c.name]));
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const orderedFields = data.groups.flatMap((g) => data.fields.filter((f) => f.group === g.id));
+  const orderedFields = data.groups.flatMap((g) =>
+    data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
+  );
 
   const header = [
     "Author",
     "Year",
-    "Category",
+    "Alloy type",
     "Title",
     "DOI",
     "Journal",
@@ -120,7 +130,7 @@ export function buildCsv(data: ExportData): string {
     const row: unknown[] = [
       p.author,
       p.year ?? "",
-      (p.category_id && catById.get(p.category_id)) || "",
+      alloyTypeOf(exp),
       p.title,
       p.doi,
       p.journal ?? "",
@@ -142,52 +152,69 @@ function esc(s: unknown): string {
 
 export function buildReportHtml(data: ExportData): string {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const expsByPaper = new Map<string, Experiment[]>();
-  for (const e of data.experiments) {
-    if (!expsByPaper.has(e.paper_id)) expsByPaper.set(e.paper_id, []);
-    expsByPaper.get(e.paper_id)!.push(e);
-  }
-  const orderedFields = data.groups.flatMap((g) => data.fields.filter((f) => f.group === g.id));
+  const orderedFields = data.groups.flatMap((g) =>
+    data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
+  );
 
-  const cats = [...data.categories, { id: "__uncat__", name: "Uncategorized", sort_order: 9999 }];
+  // Group experiments by their alloy type. One experiment belongs to exactly one
+  // group (a paper's experiments can span several alloy types).
+  const byAlloy = new Map<string, Experiment[]>();
+  for (const e of data.experiments) {
+    const key = alloyTypeOf(e) || "No alloy type";
+    if (!byAlloy.has(key)) byAlloy.set(key, []);
+    byAlloy.get(key)!.push(e);
+  }
+  const alloyKeys = Array.from(byAlloy.keys()).sort((a, b) => {
+    if (a === "No alloy type") return 1;
+    if (b === "No alloy type") return -1;
+    return a.localeCompare(b);
+  });
 
   let body = "";
-  for (const cat of cats) {
-    const papers = data.papers.filter((p) =>
-      cat.id === "__uncat__" ? !p.category_id : p.category_id === cat.id,
+  for (const alloy of alloyKeys) {
+    const exps = byAlloy.get(alloy)!;
+    // Preserve paper order, then experiment position, within each alloy group.
+    const paperOrder = new Map(data.papers.map((p, i) => [p.id, i]));
+    exps.sort(
+      (a, b) =>
+        (paperOrder.get(a.paper_id) ?? 0) - (paperOrder.get(b.paper_id) ?? 0) ||
+        a.position - b.position,
     );
-    if (papers.length === 0) continue;
-    body += `<h2>${esc(cat.name)}</h2>`;
-    for (const p of papers) {
-      const exps = (expsByPaper.get(p.id) ?? []).sort((a, b) => a.position - b.position);
-      body += `<div class="paper"><h3>${esc(p.citation_key || p.author || "Untitled")}</h3>`;
-      const meta = [p.title, p.journal, p.year, p.doi].filter(Boolean).map(esc).join(" · ");
-      if (meta) body += `<p class="meta">${meta}</p>`;
-      if (p.summary) body += `<p class="summary">${esc(p.summary)}</p>`;
-      for (const e of exps) {
-        body += `<table><caption>${esc(e.label)}</caption><tbody>`;
-        for (const g of data.groups) {
-          const fs = orderedFields.filter((f) => f.group === g.id);
-          const cells = fs
-            .map((f) => {
-              const fv = e.values?.[f.key];
-              if (f.type === "image") {
-                const src =
-                  fv && fv.state === "filled" && typeof fv.value === "string" ? fv.value : "";
-                return src
-                  ? `<tr><th>${esc(f.label)}</th><td><img src="${esc(src)}" style="max-height:200px;max-width:100%"/></td></tr>`
-                  : "";
-              }
-              const v = displayValue(fv);
-              return v ? `<tr><th>${esc(f.label)}</th><td>${esc(v)}</td></tr>` : "";
-            })
-            .join("");
-          if (cells) body += `<tr class="group"><td colspan="2">${esc(g.label)}</td></tr>${cells}`;
-        }
-        body += `</tbody></table>`;
+    body += `<h2>${esc(alloy)}</h2>`;
+    let lastPaperId: string | null = null;
+    for (const e of exps) {
+      const p = paperById.get(e.paper_id);
+      if (!p) continue;
+      if (p.id !== lastPaperId) {
+        if (lastPaperId !== null) body += `</div>`;
+        body += `<div class="paper"><h3>${esc(p.citation_key || p.author || "Untitled")}</h3>`;
+        const meta = [p.title, p.journal, p.year, p.doi].filter(Boolean).map(esc).join(" · ");
+        if (meta) body += `<p class="meta">${meta}</p>`;
+        if (p.summary) body += `<p class="summary">${esc(p.summary)}</p>`;
+        lastPaperId = p.id;
       }
-      body += `</div>`;
+      body += `<table><caption>${esc(e.label)}</caption><tbody>`;
+      for (const g of data.groups) {
+        const fs = orderedFields.filter((f) => f.group === g.id);
+        const cells = fs
+          .map((f) => {
+            const fv = e.values?.[f.key];
+            if (f.type === "image") {
+              const src =
+                fv && fv.state === "filled" && typeof fv.value === "string" ? fv.value : "";
+              return src
+                ? `<tr><th>${esc(f.label)}</th><td><img src="${esc(src)}" style="max-height:200px;max-width:100%"/></td></tr>`
+                : "";
+            }
+            const v = displayValue(fv);
+            return v ? `<tr><th>${esc(f.label)}</th><td>${esc(v)}</td></tr>` : "";
+          })
+          .join("");
+        if (cells) body += `<tr class="group"><td colspan="2">${esc(g.label)}</td></tr>${cells}`;
+      }
+      body += `</tbody></table>`;
     }
+    if (lastPaperId !== null) body += `</div>`;
   }
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>Corrosion Literature Review — Report</title>
@@ -209,7 +236,7 @@ export function buildReportHtml(data: ExportData): string {
   @media print { body { margin: 0.75in; } }
 </style></head><body>
 <h1>Corrosion Literature Review</h1>
-<p class="generated">Report grouped by material category.</p>
+<p class="generated">Report grouped by alloy type.</p>
 ${body || "<p>No records to report.</p>"}
 </body></html>`;
 }

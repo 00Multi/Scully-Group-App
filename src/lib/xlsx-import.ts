@@ -59,6 +59,11 @@ function slugify(s: string): string {
 
 // Spreadsheet abbreviations → schema field keys.
 const SYNONYMS: Record<string, string> = {
+  // The old "material category" column is now the per-experiment alloy type.
+  category: "alloy_type",
+  materialcategory: "alloy_type",
+  alloytype: "alloy_type",
+  alloysystem: "alloy_type",
   temp: "temp_c",
   time: "time_h",
   fs: "flow_static",
@@ -296,7 +301,7 @@ export async function parseWorkbook(file: File, fields: FieldDef[]): Promise<Imp
       !colA.includes(":")
     ) {
       currentCategory = colA;
-      log.push(`Row ${r + 1}: category section "${colA}".`);
+      log.push(`Row ${r + 1}: alloy-type section "${colA}".`);
       continue;
     }
 
@@ -329,17 +334,24 @@ export async function parseWorkbook(file: File, fields: FieldDef[]): Promise<Imp
     const notes = String(row[6] ?? "").trim();
 
     papers.push({
-      category_name: currentCategory,
       author,
       year,
       title: "",
       doi: "",
       notes,
       summary,
-      experiments: experiments.map((e, i) => ({
-        label: e.label || `Experiment ${i + 1}`,
-        values: e.values,
-      })),
+      experiments: experiments.map((e, i) => {
+        const values = { ...e.values };
+        // The category section header becomes the per-experiment alloy type,
+        // unless a row cell already provided one.
+        if (currentCategory && !values.alloy_type) {
+          values.alloy_type = { value: currentCategory, state: "filled" };
+        }
+        return {
+          label: e.label || `Experiment ${i + 1}`,
+          values,
+        };
+      }),
     });
 
     if (!matchedAny) {
@@ -419,11 +431,11 @@ function parseCsvText(text: string): string[][] {
 }
 
 // Normalized CSV header names that map to paper-level columns.
+// Note: "category" / "alloy type" are intentionally NOT paper columns — they
+// map to the per-experiment `alloy_type` field via SYNONYMS.
 const PAPER_COL: Record<string, string> = {
   author: "author",
   year: "year",
-  category: "category",
-  materialcategory: "category",
   title: "title",
   doi: "doi",
   journal: "journal",
@@ -472,7 +484,6 @@ function parseCsv(text: string, fileName: string, fields: FieldDef[]): ImportRes
   const idx = {
     author: paperIdx("author"),
     year: paperIdx("year"),
-    category: paperIdx("category"),
     title: paperIdx("title"),
     doi: paperIdx("doi"),
     notes: paperIdx("notes"),
@@ -490,12 +501,12 @@ function parseCsv(text: string, fileName: string, fields: FieldDef[]): ImportRes
     const title = cell(row, idx.title);
     if (!author && !title) continue;
     const year = asNum(cell(row, idx.year));
-    const category = cell(row, idx.category) || null;
-    const pk = `${author}|${year ?? ""}|${title}|${category ?? ""}`;
+    // A paper may now span several alloy types, so the alloy type is NOT part of
+    // the paper key — experiments with different alloy types roll up together.
+    const pk = `${author}|${year ?? ""}|${title}`;
     let paper = byPaper.get(pk);
     if (!paper) {
       paper = {
-        category_name: category,
         author,
         year,
         title,
@@ -614,7 +625,6 @@ function parseJson(text: string, fileName: string, fields: FieldDef[]): ImportRe
     let paper = byPaper.get(pk);
     if (!paper) {
       paper = {
-        category_name: (p.material_category as string) ?? null,
         author,
         year,
         title,
@@ -627,6 +637,11 @@ function parseJson(text: string, fileName: string, fields: FieldDef[]): ImportRe
       order.push(pk);
     }
     const values: Record<string, FieldValue> = {};
+    // Alloy type may arrive as a top-level record field, or on legacy exports as
+    // the paper's `material_category`. Either seeds the experiment's alloy_type
+    // (an explicit `fields.alloy_type` below still wins).
+    const alloyType = asStr(o.alloy_type || p.material_category).trim();
+    if (alloyType) values.alloy_type = { value: alloyType, state: "filled" };
     const flds = asObj(o.fields);
     for (const [key, raw] of Object.entries(flds)) {
       if (!takenKeys.has(key)) registerField(key, { label: key });

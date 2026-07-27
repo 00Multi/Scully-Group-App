@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownWideNarrow, ChevronRight, Plus, Search } from "lucide-react";
-import type { Category, Experiment, Paper } from "@/lib/db";
+import type { Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
 import { useFieldDefs } from "@/lib/settings";
@@ -8,8 +8,9 @@ import { useFieldDefs } from "@/lib/settings";
 export type StateFilter = "any" | FieldState;
 export type SortMode = "default" | "active" | "filled" | "added_new" | "added_old";
 
+const ALLOY_TYPE_KEY = "alloy_type";
+
 interface Props {
-  categories: Category[];
   papers: Paper[];
   experiments: Experiment[];
   selectedPaperId: string | null;
@@ -20,6 +21,11 @@ interface Props {
   setSearch: (v: string) => void;
   stateFilter: StateFilter;
   setStateFilter: (v: StateFilter) => void;
+}
+
+function alloyTypeOf(e: Experiment): string {
+  const v = e.values?.[ALLOY_TYPE_KEY]?.value;
+  return typeof v === "string" ? v.trim() : "";
 }
 
 function matchesSearch(paper: Paper, exps: Experiment[], q: string) {
@@ -37,13 +43,12 @@ function matchesSearch(paper: Paper, exps: Experiment[], q: string) {
   });
 }
 
-function matchesStateFilter(exps: Experiment[], filter: StateFilter) {
+function expMatchesState(e: Experiment, filter: StateFilter) {
   if (filter === "any") return true;
-  return exps.some((e) => Object.values(e.values).some((v) => v?.state === filter));
+  return Object.values(e.values).some((v) => v?.state === filter);
 }
 
 export function BrowseTree({
-  categories,
   papers,
   experiments,
   selectedPaperId,
@@ -55,28 +60,15 @@ export function BrowseTree({
   stateFilter,
   setStateFilter,
 }: Props) {
-  const [openCats, setOpenCats] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(categories.map((c) => [c.id, true])),
-  );
   const [openPapers, setOpenPapers] = useState<Record<string, boolean>>({});
   const [sortBy, setSortBy] = useState<SortMode>("default");
+  const [alloyFilter, setAlloyFilter] = useState<string>("all");
   const createPaper = useCreatePaper();
   const fieldDefs = useFieldDefs();
 
-  // Keep the selected paper's experiments expanded so the active row is visible.
   useEffect(() => {
     if (selectedPaperId) setOpenPapers((s) => ({ ...s, [selectedPaperId]: true }));
   }, [selectedPaperId]);
-
-  const grouped = useMemo(() => {
-    const byCat = new Map<string | null, Paper[]>();
-    for (const p of papers) {
-      const k = p.category_id;
-      if (!byCat.has(k)) byCat.set(k, []);
-      byCat.get(k)!.push(p);
-    }
-    return byCat;
-  }, [papers]);
 
   const expsByPaper = useMemo(() => {
     const m = new Map<string, Experiment[]>();
@@ -89,13 +81,20 @@ export function BrowseTree({
     return m;
   }, [experiments]);
 
-  const filterPaper = (p: Paper) => {
-    const exps = expsByPaper.get(p.id) ?? [];
-    return matchesSearch(p, exps, search) && matchesStateFilter(exps, stateFilter);
-  };
+  // Alloy-type values actually present (for the filter dropdown), unioned with
+  // the field's configured options so empty-but-defined types still appear.
+  const alloyOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of experiments) {
+      const a = alloyTypeOf(e);
+      if (a) set.add(a);
+    }
+    const field = fieldDefs.find((f) => f.key === ALLOY_TYPE_KEY);
+    for (const o of field?.options ?? []) set.add(o);
+    return Array.from(set).sort();
+  }, [experiments, fieldDefs]);
 
-  // Per-paper sort metrics: last activity (max of the paper's and its
-  // experiments' updated_at), fraction of fields filled, and date added.
+  // Per-paper sort metrics.
   const metrics = useMemo(() => {
     const m = new Map<string, { activity: string; filled: number; created: string }>();
     for (const p of papers) {
@@ -115,18 +114,34 @@ export function BrowseTree({
     return m;
   }, [papers, expsByPaper, fieldDefs]);
 
-  const sortPapers = (list: Paper[]): Paper[] => {
-    if (sortBy === "default") return list;
-    const arr = [...list];
-    const mt = (id: string) => metrics.get(id)!;
-    if (sortBy === "active") arr.sort((a, b) => mt(b.id).activity.localeCompare(mt(a.id).activity));
-    else if (sortBy === "filled") arr.sort((a, b) => mt(b.id).filled - mt(a.id).filled);
-    else if (sortBy === "added_new")
-      arr.sort((a, b) => mt(b.id).created.localeCompare(mt(a.id).created));
-    else if (sortBy === "added_old")
-      arr.sort((a, b) => mt(a.id).created.localeCompare(mt(b.id).created));
-    return arr;
+  // Experiments shown under a paper, after the alloy-type filter.
+  const shownExps = (p: Paper) => {
+    const exps = expsByPaper.get(p.id) ?? [];
+    if (alloyFilter === "all") return exps;
+    return exps.filter((e) => alloyTypeOf(e) === alloyFilter);
   };
+
+  const visiblePapers = useMemo(() => {
+    let list = papers.filter((p) => {
+      const exps = expsByPaper.get(p.id) ?? [];
+      if (!matchesSearch(p, exps, search)) return false;
+      if (stateFilter !== "any" && !exps.some((e) => expMatchesState(e, stateFilter))) return false;
+      if (alloyFilter !== "all" && !exps.some((e) => alloyTypeOf(e) === alloyFilter)) return false;
+      return true;
+    });
+    if (sortBy !== "default") {
+      const mt = (id: string) => metrics.get(id)!;
+      list = [...list];
+      if (sortBy === "active")
+        list.sort((a, b) => mt(b.id).activity.localeCompare(mt(a.id).activity));
+      else if (sortBy === "filled") list.sort((a, b) => mt(b.id).filled - mt(a.id).filled);
+      else if (sortBy === "added_new")
+        list.sort((a, b) => mt(b.id).created.localeCompare(mt(a.id).created));
+      else if (sortBy === "added_old")
+        list.sort((a, b) => mt(a.id).created.localeCompare(mt(b.id).created));
+    }
+    return list;
+  }, [papers, expsByPaper, search, stateFilter, alloyFilter, sortBy, metrics]);
 
   return (
     <aside className="w-72 shrink-0 border-r border-rule bg-card/50 flex flex-col h-[calc(100vh-3.5rem)] sticky top-14">
@@ -140,6 +155,19 @@ export function BrowseTree({
             className="w-full pl-7 pr-2 py-1.5 text-xs bg-background border border-input rounded focus:outline-none focus:border-primary"
           />
         </div>
+        <select
+          value={alloyFilter}
+          onChange={(e) => setAlloyFilter(e.target.value)}
+          className="w-full py-1.5 px-2 text-xs bg-background border border-input rounded focus:outline-none"
+          aria-label="Filter by alloy type"
+        >
+          <option value="all">All alloy types</option>
+          {alloyOptions.map((a) => (
+            <option key={a} value={a}>
+              {a}
+            </option>
+          ))}
+        </select>
         <select
           value={stateFilter}
           onChange={(e) => setStateFilter(e.target.value as StateFilter)}
@@ -159,7 +187,7 @@ export function BrowseTree({
             className="w-full pl-7 pr-2 py-1.5 text-xs bg-background border border-input rounded focus:outline-none"
             aria-label="Sort papers"
           >
-            <option value="default">Sort: default (by category)</option>
+            <option value="default">Sort: default</option>
             <option value="active">Sort: recently active</option>
             <option value="filled">Sort: most data filled</option>
             <option value="added_new">Sort: newest added</option>
@@ -167,97 +195,87 @@ export function BrowseTree({
           </select>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto py-2">
-        {categories.map((cat) => {
-          const catPapers = sortPapers((grouped.get(cat.id) ?? []).filter(filterPaper));
-          const open = openCats[cat.id] ?? true;
+
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-rule/60">
+        <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+          {visiblePapers.length} paper{visiblePapers.length === 1 ? "" : "s"}
+        </span>
+        <button
+          onClick={() => createPaper.mutate({ category_id: null })}
+          className="inline-flex items-center gap-1 text-xs text-copper hover:underline"
+        >
+          <Plus className="h-3 w-3" /> New paper
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto py-1">
+        {visiblePapers.length === 0 && (
+          <p className="px-3 py-4 text-xs text-muted-foreground italic">No papers match.</p>
+        )}
+        {visiblePapers.map((p) => {
+          const exps = shownExps(p);
+          const active = p.id === selectedPaperId;
+          const paperOpen = openPapers[p.id] ?? false;
           return (
-            <div key={cat.id} className="mb-1">
-              <button
-                onClick={() => setOpenCats((s) => ({ ...s, [cat.id]: !open }))}
-                className="w-full flex items-center gap-1 px-3 py-1 text-[11px] uppercase tracking-widest text-copper font-mono hover:bg-accent/50"
+            <div key={p.id} className="mb-0.5">
+              <div
+                className={`group flex items-start rounded-sm mx-1 ${
+                  active ? "bg-accent text-foreground" : "text-ink-muted hover:bg-accent/70"
+                }`}
               >
-                <ChevronRight
-                  className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`}
-                />
-                <span className="flex-1 text-left">{cat.name}</span>
-                <span className="text-muted-foreground normal-case tracking-normal">
-                  {catPapers.length}
-                </span>
-              </button>
-              {open && (
-                <div className="pl-2">
-                  {catPapers.map((p) => {
-                    const exps = expsByPaper.get(p.id) ?? [];
-                    const active = p.id === selectedPaperId;
-                    const paperOpen = openPapers[p.id] ?? false;
+                <button
+                  onClick={() => setOpenPapers((s) => ({ ...s, [p.id]: !paperOpen }))}
+                  className="pl-2 pt-2 shrink-0"
+                  aria-label={paperOpen ? "Collapse experiments" : "Expand experiments"}
+                >
+                  <ChevronRight
+                    className={`h-3 w-3 text-muted-foreground transition-transform ${
+                      paperOpen ? "rotate-90" : ""
+                    } ${exps.length === 0 ? "opacity-20" : ""}`}
+                  />
+                </button>
+                <button
+                  onClick={() => {
+                    onSelectPaper(p.id);
+                    setOpenPapers((s) => ({ ...s, [p.id]: true }));
+                  }}
+                  className="flex-1 text-left px-2 py-1.5 text-sm min-w-0"
+                >
+                  <div className="font-serif italic truncate">{p.citation_key || "Untitled"}</div>
+                  <div className="text-[10px] text-muted-foreground font-mono">
+                    {exps.length} exp{exps.length === 1 ? "" : "s"}
+                  </div>
+                </button>
+              </div>
+              {paperOpen && exps.length > 0 && (
+                <ul className="ml-[1.85rem] border-l border-rule/60 pl-1">
+                  {exps.map((e) => {
+                    const expActive = e.id === selectedExperimentId;
+                    const alloy = alloyTypeOf(e);
                     return (
-                      <div key={p.id}>
-                        <div
-                          className={`group flex items-start rounded-sm ${
-                            active
-                              ? "bg-accent text-foreground"
-                              : "text-ink-muted hover:bg-accent/70"
+                      <li key={e.id}>
+                        <button
+                          onClick={() => onSelectExperiment(p.id, e.id)}
+                          className={`w-full text-left px-2 py-1 text-xs rounded-sm flex items-center gap-1.5 ${
+                            expActive
+                              ? "bg-copper/15 text-foreground"
+                              : "text-muted-foreground hover:bg-accent/60"
                           }`}
+                          title={e.label}
                         >
-                          <button
-                            onClick={() => setOpenPapers((s) => ({ ...s, [p.id]: !paperOpen }))}
-                            className="pl-2 pt-2 shrink-0"
-                            aria-label={paperOpen ? "Collapse experiments" : "Expand experiments"}
-                          >
-                            <ChevronRight
-                              className={`h-3 w-3 text-muted-foreground transition-transform ${
-                                paperOpen ? "rotate-90" : ""
-                              } ${exps.length === 0 ? "opacity-20" : ""}`}
-                            />
-                          </button>
-                          <button
-                            onClick={() => {
-                              onSelectPaper(p.id);
-                              setOpenPapers((s) => ({ ...s, [p.id]: true }));
-                            }}
-                            className="flex-1 text-left px-2 py-1.5 text-sm min-w-0"
-                          >
-                            <div className="font-serif italic truncate">
-                              {p.citation_key || "Untitled"}
-                            </div>
-                            <div className="text-[10px] text-muted-foreground font-mono">
-                              {exps.length} exp{exps.length === 1 ? "" : "s"}
-                            </div>
-                          </button>
-                        </div>
-                        {paperOpen && exps.length > 0 && (
-                          <ul className="ml-[1.35rem] border-l border-rule/60 pl-1">
-                            {exps.map((e) => {
-                              const expActive = e.id === selectedExperimentId;
-                              return (
-                                <li key={e.id}>
-                                  <button
-                                    onClick={() => onSelectExperiment(p.id, e.id)}
-                                    className={`w-full text-left px-2 py-1 text-xs rounded-sm truncate ${
-                                      expActive
-                                        ? "bg-copper/15 text-foreground"
-                                        : "text-muted-foreground hover:bg-accent/60"
-                                    }`}
-                                    title={e.label}
-                                  >
-                                    {e.label || "Untitled experiment"}
-                                  </button>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        )}
-                      </div>
+                          <span className="truncate flex-1 min-w-0">
+                            {e.label || "Untitled experiment"}
+                          </span>
+                          {alloy && (
+                            <span className="shrink-0 rounded-sm bg-copper/15 text-copper px-1 py-px text-[9px] font-mono uppercase tracking-wide">
+                              {alloy}
+                            </span>
+                          )}
+                        </button>
+                      </li>
                     );
                   })}
-                  <button
-                    onClick={() => createPaper.mutate({ category_id: cat.id })}
-                    className="w-full flex items-center gap-1 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
-                  >
-                    <Plus className="h-3 w-3" /> Add paper
-                  </button>
-                </div>
+                </ul>
               )}
             </div>
           );

@@ -373,7 +373,6 @@ export function useBulkUpdateExperiments() {
 }
 
 export interface ImportPaperInput {
-  category_name: string | null;
   author: string;
   year: number | null;
   title: string;
@@ -383,47 +382,20 @@ export interface ImportPaperInput {
   experiments: { label: string; values: Record<string, FieldValue> }[];
 }
 
-// Bulk import parsed papers + experiments, creating any missing categories.
+// Bulk import parsed papers + experiments. Alloy classification now lives on
+// each experiment's `values.alloy_type`, so no category rows are created.
 export function useImportData() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (papersInput: ImportPaperInput[]) => {
-      // Resolve / create categories by name.
-      const { data: existingCats } = await supabase.from("material_categories").select("*");
-      const catByName = new Map<string, string>(
-        (existingCats || []).map((c: any) => [c.name.toLowerCase(), c.id]),
-      );
-      const neededNames = Array.from(
-        new Set(
-          papersInput
-            .map((p) => p.category_name?.trim())
-            .filter((n): n is string => !!n && !catByName.has(n.toLowerCase())),
-        ),
-      );
-      let sort = (existingCats?.length ?? 0) * 10 + 10;
-      for (const name of neededNames) {
-        const { data, error } = await supabase
-          .from("material_categories")
-          .insert({ name, sort_order: sort } as any)
-          .select()
-          .single();
-        if (error) throw error;
-        catByName.set(name.toLowerCase(), data.id);
-        sort += 10;
-      }
-
       let paperCount = 0;
       let expCount = 0;
       for (const p of papersInput) {
-        const category_id = p.category_name
-          ? (catByName.get(p.category_name.toLowerCase()) ?? null)
-          : null;
         const citation_key =
           p.author && p.year ? `${p.author.split(/[\s,]+/)[0]} ${p.year}` : p.author || "Untitled";
         const { data: paperRow, error: pErr } = await supabase
           .from("papers")
           .insert({
-            category_id,
             author: p.author,
             year: p.year,
             title: p.title,
@@ -450,12 +422,11 @@ export function useImportData() {
         if (eErr) throw eErr;
         expCount += rows.length;
       }
-      return { papers: paperCount, experiments: expCount, categories: neededNames.length };
+      return { papers: paperCount, experiments: expCount };
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["papers"] });
       qc.invalidateQueries({ queryKey: ["experiments"] });
-      qc.invalidateQueries({ queryKey: ["categories"] });
     },
   });
 }

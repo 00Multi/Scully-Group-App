@@ -9,15 +9,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import {
-  useCategories,
-  usePapers,
-  useExperiments,
-  useCreateCategory,
-  useUpdateCategory,
-  useDeleteCategory,
-} from "@/lib/db";
-import type { Category, Experiment } from "@/lib/db";
+import { usePapers, useExperiments } from "@/lib/db";
+import type { Experiment } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { DangerZone } from "@/components/DangerZone";
@@ -43,7 +36,6 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
-  const { data: categories = [] } = useCategories();
   const { data: papers = [] } = usePapers();
   const { data: experiments = [] } = useExperiments();
   const { fieldDefs } = useSettings();
@@ -70,19 +62,11 @@ function Dashboard() {
     return { totalCells, filled, missing, na, needsCheck, perField };
   }, [experiments, fieldDefs]);
 
-  const catCounts = useMemo(() => {
-    const m = new Map<string, { papers: number; exps: number }>();
-    for (const c of categories) m.set(c.id, { papers: 0, exps: 0 });
-    for (const p of papers) {
-      if (p.category_id && m.has(p.category_id)) m.get(p.category_id)!.papers++;
-    }
-    const paperCat = new Map(papers.map((p) => [p.id, p.category_id]));
-    for (const e of experiments) {
-      const cid = paperCat.get(e.paper_id);
-      if (cid && m.has(cid)) m.get(cid)!.exps++;
-    }
-    return m;
-  }, [categories, papers, experiments]);
+  // Experiments per alloy type (the field that replaced material categories).
+  const alloyCounts = useMemo(
+    () => categoricalDistribution(experiments, "alloy_type"),
+    [experiments],
+  );
 
   const worstFields = useMemo(() => {
     return fieldDefs
@@ -154,22 +138,20 @@ function Dashboard() {
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
-        <Panel title="Categories" className="lg:col-span-1">
+        <Panel title="Alloy types" className="lg:col-span-1">
           <ul className="text-sm">
-            {categories.map((c) => {
-              const cc = catCounts.get(c.id)!;
-              return (
-                <li
-                  key={c.id}
-                  className="flex items-baseline justify-between py-1.5 border-b border-rule/60 last:border-0"
-                >
-                  <span className="font-serif italic">{c.name}</span>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {cc.papers} papers · {cc.exps} exps
-                  </span>
-                </li>
-              );
-            })}
+            {alloyCounts.map((a) => (
+              <li
+                key={a.label}
+                className="flex items-baseline justify-between py-1.5 border-b border-rule/60 last:border-0"
+              >
+                <span className="font-serif italic">{a.label}</span>
+                <span className="font-mono text-xs text-muted-foreground">{a.count} exps</span>
+              </li>
+            ))}
+            {alloyCounts.length === 0 && (
+              <li className="text-muted-foreground italic">No alloy types set yet.</li>
+            )}
           </ul>
         </Panel>
 
@@ -284,8 +266,6 @@ function Dashboard() {
         </div>
       </section>
 
-      <CategoryManager categories={categories} />
-
       <SchemaManager />
 
       <DangerZone />
@@ -332,91 +312,6 @@ function OptionsInput({
       className="bg-muted/40 rounded px-2 py-1 text-xs font-mono focus:outline-none"
       aria-label="Dropdown options"
     />
-  );
-}
-
-function CategoryManager({ categories }: { categories: Category[] }) {
-  const create = useCreateCategory();
-  const update = useUpdateCategory();
-  const del = useDeleteCategory();
-  const [newName, setNewName] = useState("");
-  const [names, setNames] = useState<Record<string, string>>({});
-
-  const nameFor = (c: Category) => names[c.id] ?? c.name;
-
-  const addCategory = () => {
-    const n = newName.trim();
-    if (!n) return;
-    create.mutate(n, { onSuccess: () => setNewName("") });
-  };
-
-  return (
-    <section className="mb-10">
-      <div className="mb-3">
-        <h2 className="text-2xl font-serif italic">Material categories</h2>
-        <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-          Add, rename, or remove the top level of the browse tree. Deleting a category keeps its
-          papers — they move to “Uncategorized”.
-        </p>
-      </div>
-
-      <div className="rounded-lg border border-rule bg-card overflow-hidden">
-        {categories.map((c) => (
-          <div
-            key={c.id}
-            className="flex items-center gap-2 px-4 py-2 border-b border-rule/60 last:border-0"
-          >
-            <input
-              value={nameFor(c)}
-              onChange={(e) => setNames((s) => ({ ...s, [c.id]: e.target.value }))}
-              onBlur={() => {
-                const next = nameFor(c).trim();
-                if (next && next !== c.name) update.mutate({ id: c.id, name: next });
-              }}
-              className="flex-1 bg-transparent text-sm font-serif italic border-b border-transparent focus:border-primary focus:outline-none min-w-0"
-              aria-label="Category name"
-            />
-            <button
-              onClick={() => {
-                if (
-                  confirm(
-                    `Delete the "${c.name}" category? Its papers are kept and moved to Uncategorized.`,
-                  )
-                )
-                  del.mutate(c.id);
-              }}
-              className="text-muted-foreground hover:text-destructive transition-colors p-1 shrink-0"
-              aria-label="Delete category"
-              title="Delete category"
-            >
-              <Trash2 className="h-4 w-4" />
-            </button>
-          </div>
-        ))}
-        {categories.length === 0 && (
-          <div className="px-4 py-3 text-sm text-muted-foreground italic">No categories yet.</div>
-        )}
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        <input
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") addCategory();
-          }}
-          placeholder="New category name (e.g. Fe-Cr)"
-          className="flex-1 max-w-xs bg-background border border-input rounded px-2 py-1.5 text-sm focus:outline-none focus:border-primary"
-        />
-        <button
-          onClick={addCategory}
-          disabled={!newName.trim() || create.isPending}
-          className="inline-flex items-center gap-1.5 rounded-md border border-rule px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
-        >
-          <Plus className="h-4 w-4" /> Add category
-        </button>
-      </div>
-    </section>
   );
 }
 

@@ -1,11 +1,5 @@
 import { useRef, useState } from "react";
-import {
-  useCategories,
-  useCreatePaper,
-  useUploadPaperPdf,
-  useUpdatePaper,
-  type Paper,
-} from "@/lib/db";
+import { useCreatePaper, useUploadPaperPdf, useUpdatePaper, type Paper } from "@/lib/db";
 import { extractPdfText, findDoi } from "@/lib/pdf-extract";
 import { fetchCrossref } from "@/lib/crossref";
 import { FileUp, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
@@ -18,18 +12,14 @@ interface Job {
 }
 
 export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => void }) {
-  const { data: categories = [] } = useCategories();
   const createPaper = useCreatePaper();
   const uploadPdf = useUploadPaperPdf();
   const updatePaper = useUpdatePaper();
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const [categoryId, setCategoryId] = useState<string>("");
   const [dragOver, setDragOver] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [busy, setBusy] = useState(false);
-
-  const effectiveCategory = categoryId || categories[0]?.id || null;
 
   const setJob = (i: number, patch: Partial<Job>) =>
     setJobs((prev) => prev.map((j, idx) => (idx === i ? { ...j, ...patch } : j)));
@@ -38,7 +28,7 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
     try {
       // 1. Create the paper (auto-creates its first experiment) and upload PDF.
       const paper = (await createPaper.mutateAsync({
-        category_id: effectiveCategory,
+        category_id: null,
         title: file.name.replace(/\.pdf$/i, ""),
       })) as Paper;
       await uploadPdf.mutateAsync({ paperId: paper.id, file });
@@ -50,12 +40,19 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
       try {
         text = await extractPdfText(file);
       } catch {
-        setJob(jobIndex, { status: "warn", message: "Uploaded. Couldn't read text (scanned PDF?) — fill fields manually." });
+        setJob(jobIndex, {
+          status: "warn",
+          message: "Uploaded. Couldn't read text (scanned PDF?) — fill fields manually.",
+        });
         return;
       }
       const doi = findDoi(text);
       if (!doi) {
-        setJob(jobIndex, { status: "warn", message: "Uploaded. No DOI found in the text — add a DOI and use Prefill, or fill manually." });
+        setJob(jobIndex, {
+          status: "warn",
+          message:
+            "Uploaded. No DOI found in the text — add a DOI and use Prefill, or fill manually.",
+        });
         return;
       }
 
@@ -65,10 +62,10 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
         const r = await fetchCrossref(doi);
         const autoFilled: Record<string, boolean> = {};
         const patch: Partial<Paper> = { doi };
-        if (r.title) (patch.title = r.title), (autoFilled.title = true);
-        if (r.authors) (patch.author = r.authors), (autoFilled.author = true);
-        if (r.year != null) (patch.year = r.year), (autoFilled.year = true);
-        if (r.journal) (patch.journal = r.journal), (autoFilled.journal = true);
+        if (r.title) ((patch.title = r.title), (autoFilled.title = true));
+        if (r.authors) ((patch.author = r.authors), (autoFilled.author = true));
+        if (r.year != null) ((patch.year = r.year), (autoFilled.year = true));
+        if (r.journal) ((patch.journal = r.journal), (autoFilled.journal = true));
         if (r.abstract) {
           patch.abstract = r.abstract;
           patch.summary = r.abstract;
@@ -89,9 +86,15 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
           crossref_fetched_at: new Date().toISOString(),
         };
         await updatePaper.mutateAsync({ id: paper.id, patch });
-        setJob(jobIndex, { status: "done", message: `Imported “${r.citationKey}” — ${Object.keys(autoFilled).length} fields auto-filled.` });
+        setJob(jobIndex, {
+          status: "done",
+          message: `Imported “${r.citationKey}” — ${Object.keys(autoFilled).length} fields auto-filled.`,
+        });
       } catch (e: any) {
-        setJob(jobIndex, { status: "warn", message: `Uploaded with DOI ${doi}, but Crossref failed (${e?.message ?? "error"}).` });
+        setJob(jobIndex, {
+          status: "warn",
+          message: `Uploaded with DOI ${doi}, but Crossref failed (${e?.message ?? "error"}).`,
+        });
       }
     } catch (e: any) {
       setJob(jobIndex, { status: "error", message: e?.message ?? "Upload failed." });
@@ -104,7 +107,14 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
     );
     if (pdfs.length === 0) return;
     const startIndex = jobs.length;
-    setJobs((prev) => [...prev, ...pdfs.map((f) => ({ name: f.name, status: "working" as Status, message: "Creating paper…" }))]);
+    setJobs((prev) => [
+      ...prev,
+      ...pdfs.map((f) => ({
+        name: f.name,
+        status: "working" as Status,
+        message: "Creating paper…",
+      })),
+    ]);
     setBusy(true);
     for (let i = 0; i < pdfs.length; i++) {
       await processFile(pdfs[i], startIndex + i);
@@ -112,28 +122,12 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
     setBusy(false);
   };
 
-  const noCategories = categories.length === 0;
-
   return (
     <div className="rounded-lg border border-rule bg-card">
       <div className="flex items-center gap-3 px-4 py-2 border-b border-rule/60">
         <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
           Add papers from PDF
         </span>
-        <label className="ml-auto text-xs text-muted-foreground flex items-center gap-1">
-          Into
-          <select
-            value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
-            className="bg-transparent border border-input rounded px-2 py-1 text-xs"
-          >
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
 
       <div
@@ -166,14 +160,17 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
             e.target.value = "";
           }}
         />
-        {busy ? <Loader2 className="h-6 w-6 text-copper animate-spin" /> : <FileUp className="h-6 w-6 text-copper" />}
+        {busy ? (
+          <Loader2 className="h-6 w-6 text-copper animate-spin" />
+        ) : (
+          <FileUp className="h-6 w-6 text-copper" />
+        )}
         <p className="text-sm">
           Drag &amp; drop PDFs here, or <span className="text-copper underline">browse</span>
         </p>
         <p className="text-xs text-muted-foreground">
-          {noCategories
-            ? "Add a material category first (Dashboard → Columns), then drop PDFs here."
-            : "Each PDF becomes a paper; its DOI is read and metadata auto-filled from Crossref."}
+          Each PDF becomes a paper; its DOI is read and metadata auto-filled from Crossref. Set the
+          alloy type per experiment once it's created.
         </p>
       </div>
 
@@ -181,10 +178,18 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
         <ul className="px-4 pb-3 space-y-1">
           {jobs.map((j, i) => (
             <li key={i} className="flex items-start gap-2 text-xs">
-              {j.status === "working" && <Loader2 className="h-3.5 w-3.5 mt-0.5 animate-spin text-muted-foreground shrink-0" />}
-              {j.status === "done" && <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 text-state-filled shrink-0" />}
-              {j.status === "warn" && <AlertCircle className="h-3.5 w-3.5 mt-0.5 text-state-check shrink-0" />}
-              {j.status === "error" && <AlertCircle className="h-3.5 w-3.5 mt-0.5 text-destructive shrink-0" />}
+              {j.status === "working" && (
+                <Loader2 className="h-3.5 w-3.5 mt-0.5 animate-spin text-muted-foreground shrink-0" />
+              )}
+              {j.status === "done" && (
+                <CheckCircle2 className="h-3.5 w-3.5 mt-0.5 text-state-filled shrink-0" />
+              )}
+              {j.status === "warn" && (
+                <AlertCircle className="h-3.5 w-3.5 mt-0.5 text-state-check shrink-0" />
+              )}
+              {j.status === "error" && (
+                <AlertCircle className="h-3.5 w-3.5 mt-0.5 text-destructive shrink-0" />
+              )}
               <span className="min-w-0">
                 <span className="font-mono">{j.name}</span>
                 <span className="text-muted-foreground"> — {j.message}</span>

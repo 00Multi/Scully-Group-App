@@ -12,7 +12,7 @@ export const Route = createFileRoute("/import")({
       {
         name: "description",
         content:
-          "One-time importer that reads the existing corrosion-review spreadsheet, maps sections to categories, and creates papers and experiments.",
+          "One-time importer that reads the existing corrosion-review spreadsheet, maps sections to alloy types, and creates papers and experiments.",
       },
     ],
   }),
@@ -24,6 +24,16 @@ function countFilled(p: ImportPaperInput): number {
   for (const e of p.experiments)
     for (const v of Object.values(e.values)) if (v.state === "filled" || v.state === "na") n++;
   return n;
+}
+
+// Distinct alloy types across a paper's experiments, for the preview column.
+function alloyTypesOf(p: ImportPaperInput): string {
+  const set = new Set<string>();
+  for (const e of p.experiments) {
+    const v = e.values?.["alloy_type"]?.value;
+    if (typeof v === "string" && v.trim()) set.add(v.trim());
+  }
+  return set.size ? Array.from(set).join(", ") : "—";
 }
 
 function ImportPage() {
@@ -38,7 +48,6 @@ function ImportPage() {
   const [done, setDone] = useState<{
     papers: number;
     experiments: number;
-    categories: number;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,11 +96,11 @@ function ImportPage() {
         Import from <span className="font-mono">.xlsx</span>,{" "}
         <span className="font-mono">.csv</span>, <span className="font-mono">.json</span>, or{" "}
         <span className="font-mono">.jsonl</span>. The original review workbook maps section headers
-        to categories, parses <span className="font-mono">Author Year</span> into papers, and splits
-        multi-condition cells into separate experiments. CSV and JSON/JSONL round-trip the app's own
-        exports (one record per experiment). Labels not already in the schema are added as new data
-        points (Missing everywhere else) — nothing is silently dropped, and the log lists every
-        split, new field, and ambiguous cell.
+        to alloy types, parses <span className="font-mono">Author Year</span> into papers, and
+        splits multi-condition cells into separate experiments. CSV and JSON/JSONL round-trip the
+        app's own exports (one record per experiment). Labels not already in the schema are added as
+        new data points (Missing everywhere else) — nothing is silently dropped, and the log lists
+        every split, new field, and ambiguous cell.
       </p>
 
       <div className="mt-8 rounded-lg border border-rule bg-card p-5">
@@ -130,11 +139,7 @@ function ImportPage() {
       {done && (
         <div className="mt-4 rounded-lg border border-state-filled/40 bg-state-filled/5 p-4 text-sm">
           Imported <strong>{done.papers}</strong> papers and <strong>{done.experiments}</strong>{" "}
-          experiments
-          {done.categories
-            ? `, creating ${done.categories} new categor${done.categories === 1 ? "y" : "ies"}`
-            : ""}
-          . Open{" "}
+          experiments. Open{" "}
           <a href="/browse" className="text-copper hover:underline">
             Browse
           </a>{" "}
@@ -161,7 +166,7 @@ function ImportPage() {
           <div className="rounded-lg border border-rule bg-card overflow-hidden">
             <div className="grid grid-cols-[1fr_10rem_5rem_6rem] gap-3 px-4 py-2 border-b border-rule text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
               <div>Author</div>
-              <div>Category</div>
+              <div>Alloy type</div>
               <div>Year</div>
               <div>Fields</div>
             </div>
@@ -172,9 +177,7 @@ function ImportPage() {
                   className="grid grid-cols-[1fr_10rem_5rem_6rem] gap-3 px-4 py-1.5 border-b border-rule/60 last:border-0 text-sm items-center"
                 >
                   <div className="truncate font-mono">{p.author}</div>
-                  <div className="truncate text-muted-foreground text-xs">
-                    {p.category_name ?? "—"}
-                  </div>
+                  <div className="truncate text-muted-foreground text-xs">{alloyTypesOf(p)}</div>
                   <div className="font-mono text-xs">{p.year ?? "—"}</div>
                   <div className="font-mono text-xs">{countFilled(p)} filled</div>
                 </div>
