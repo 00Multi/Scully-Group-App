@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { usePapers, useExperiments } from "@/lib/db";
+import { usePapers, useExperiments, pdfPublicUrl } from "@/lib/db";
 import type { Experiment } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
@@ -14,7 +14,18 @@ import {
   META_COLUMNS,
   type ExportData,
 } from "@/lib/xlsx-export";
-import { Braces, FileJson, FileSpreadsheet, FileText, Printer, Search, Table } from "lucide-react";
+import { buildZip, safeFileName, type ZipFile } from "@/lib/zip";
+import {
+  Braces,
+  FileArchive,
+  FileJson,
+  FileSpreadsheet,
+  FileText,
+  Loader2,
+  Printer,
+  Search,
+  Table,
+} from "lucide-react";
 
 type StateFilter = "any" | FieldState;
 
@@ -285,6 +296,66 @@ function ExportPage() {
       `corrosion_metadata_${new Date().toISOString().slice(0, 10)}.xlsx`,
     );
 
+  // ---- Download every attached PDF as a single .zip ----
+  const papersWithPdf = useMemo(() => filteredPapers.filter((p) => p.pdf_path), [filteredPapers]);
+  const [zipBusy, setZipBusy] = useState(false);
+  const [zipProgress, setZipProgress] = useState<{ done: number; total: number }>({
+    done: 0,
+    total: 0,
+  });
+  const [zipMsg, setZipMsg] = useState<string | null>(null);
+
+  const downloadAllPdfs = async () => {
+    if (zipBusy || papersWithPdf.length === 0) return;
+    setZipBusy(true);
+    setZipMsg(null);
+    setZipProgress({ done: 0, total: papersWithPdf.length });
+    const files: ZipFile[] = [];
+    const used = new Set<string>();
+    let failed = 0;
+    for (let i = 0; i < papersWithPdf.length; i++) {
+      const p = papersWithPdf[i];
+      setZipProgress({ done: i, total: papersWithPdf.length });
+      const url = pdfPublicUrl(p.pdf_path);
+      if (!url) {
+        failed++;
+        continue;
+      }
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(String(res.status));
+        const data = new Uint8Array(await res.arrayBuffer());
+        // Name each file after its citation key, keeping the .pdf extension and
+        // de-duplicating collisions.
+        let base = safeFileName(p.citation_key || p.pdf_name || `paper_${i + 1}`, `paper_${i + 1}`);
+        if (!/\.pdf$/i.test(base)) base += ".pdf";
+        let name = base;
+        let k = 2;
+        while (used.has(name.toLowerCase())) name = base.replace(/\.pdf$/i, ` (${k++}).pdf`);
+        used.add(name.toLowerCase());
+        files.push({ name, data });
+      } catch {
+        failed++;
+      }
+    }
+    setZipProgress({ done: papersWithPdf.length, total: papersWithPdf.length });
+    if (files.length) {
+      const blob = buildZip(files);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `corrosion_pdfs_${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+    setZipMsg(
+      `${files.length} PDF${files.length === 1 ? "" : "s"} zipped${
+        failed ? ` · ${failed} could not be downloaded` : ""
+      }.`,
+    );
+    setZipBusy(false);
+  };
+
   const recordCount = filteredExps.length;
   const hasNoAlloy = useMemo(() => experiments.some((e) => !alloyTypeOf(e)), [experiments]);
 
@@ -295,9 +366,9 @@ function ExportPage() {
         Machine-readable <strong>JSONL</strong>, <strong>JSON</strong>, or <strong>CSV</strong> for
         AI training and reuse, a human-readable <strong>XLSX</strong> reproducing the column groups,
         and a printable <strong>PDF report</strong> — or export the{" "}
-        <strong>paper metadata alone</strong>, one row per paper. All formats respect the filters
-        below — alloy type, search, field state, and which metadata columns and data points to
-        include.
+        <strong>paper metadata alone</strong>, one row per paper, or every attached{" "}
+        <strong>PDF as a .zip</strong>. All formats respect the filters below — alloy type, search,
+        field state, and which metadata columns and data points to include.
       </p>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-4">
@@ -566,6 +637,37 @@ function ExportPage() {
           onClick={downloadMetaJson}
           disabled={activeMeta.length === 0}
         />
+      </div>
+
+      <h2 className="mt-8 text-2xl font-serif italic">PDF files</h2>
+      <p className="text-[11px] text-muted-foreground">
+        The uploaded PDFs themselves — bundled into one <strong>.zip</strong>, named by citation
+        key. {papersWithPdf.length} of {filteredPapers.length} filtered paper
+        {filteredPapers.length === 1 ? "" : "s"} {papersWithPdf.length === 1 ? "has" : "have"} a PDF
+        attached.
+      </p>
+      <div className="mt-3 rounded-lg border border-rule bg-card p-4 flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-2 text-copper">
+          <FileArchive className="h-5 w-5" />
+          <span className="text-lg font-serif italic text-foreground">All PDFs (.zip)</span>
+        </div>
+        <p className="text-xs text-muted-foreground flex-1 min-w-[12rem]">
+          Fetches each attached PDF and packages them into a single archive, downloaded in your
+          browser.
+        </p>
+        <div className="flex flex-col items-end gap-1">
+          <button
+            onClick={downloadAllPdfs}
+            disabled={zipBusy || papersWithPdf.length === 0}
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {zipBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+            {zipBusy
+              ? `Zipping ${zipProgress.done}/${zipProgress.total}…`
+              : `Download ${papersWithPdf.length} PDF${papersWithPdf.length === 1 ? "" : "s"}`}
+          </button>
+          {zipMsg && <span className="text-[11px] text-muted-foreground">{zipMsg}</span>}
+        </div>
       </div>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-5 space-y-4">
