@@ -79,11 +79,11 @@ export function ImageFieldRow({
   const remove = () => onChange({ ...value, value: null, state: "missing" });
 
   return (
-    <div className="group flex items-start gap-2 @sm:gap-3 py-2 border-b border-rule/60 last:border-0">
+    <div className="group flex items-start gap-2 py-2 border-b border-rule/60 last:border-0">
       {expControl && <div className="pt-1 shrink-0">{expControl}</div>}
 
       <FieldTooltip field={field}>
-        <div className="pt-1.5 w-24 @sm:w-32 shrink-0 text-sm text-ink-muted cursor-help select-none break-words">
+        <div className="pt-1.5 w-16 @sm:w-20 shrink-0 text-xs leading-tight text-ink-muted cursor-help select-none break-words hyphens-auto">
           {field.label}
         </div>
       </FieldTooltip>
