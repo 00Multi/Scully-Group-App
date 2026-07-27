@@ -22,6 +22,7 @@ export interface Paper {
   pdf_path: string;
   pdf_name: string;
   journal: string;
+  institution: string;
   notes: string;
   meta: Record<string, unknown>;
   auto_filled: Record<string, boolean>;
@@ -44,6 +45,7 @@ function normalizePaper(row: any): Paper {
     pdf_path: row?.pdf_path ?? "",
     pdf_name: row?.pdf_name ?? "",
     journal: row?.journal ?? "",
+    institution: row?.institution ?? "",
     notes: row?.notes ?? "",
     meta: row?.meta ?? {},
     auto_filled: row?.auto_filled ?? {},
@@ -377,6 +379,9 @@ export interface ImportPaperInput {
   year: number | null;
   title: string;
   doi: string;
+  journal?: string;
+  institution?: string;
+  abstract?: string;
   notes: string;
   summary: string;
   experiments: { label: string; values: Record<string, FieldValue> }[];
@@ -400,6 +405,9 @@ export function useImportData() {
             year: p.year,
             title: p.title,
             doi: p.doi,
+            journal: p.journal ?? "",
+            institution: p.institution ?? "",
+            abstract: p.abstract ?? "",
             notes: p.notes,
             summary: p.summary,
             citation_key,

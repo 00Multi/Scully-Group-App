@@ -4,8 +4,17 @@ import { usePapers, useExperiments } from "@/lib/db";
 import type { Experiment } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
-import { buildCsv, downloadXlsx, openPrintReport, type ExportData } from "@/lib/xlsx-export";
-import { Braces, FileJson, FileSpreadsheet, Printer, Search, Table } from "lucide-react";
+import {
+  buildCsv,
+  buildPapersCsv,
+  downloadPapersXlsx,
+  downloadXlsx,
+  openPrintReport,
+  paperMetaRecord,
+  META_COLUMNS,
+  type ExportData,
+} from "@/lib/xlsx-export";
+import { Braces, FileJson, FileSpreadsheet, FileText, Printer, Search, Table } from "lucide-react";
 
 type StateFilter = "any" | FieldState;
 
@@ -66,6 +75,20 @@ function ExportPage() {
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
   // Data points (fields) to leave OUT of the export. Empty = include everything.
   const [excludedFields, setExcludedFields] = useState<Set<string>>(() => new Set());
+  // Paper-metadata columns to leave OUT. Empty = include every metadata column.
+  const [excludedMeta, setExcludedMeta] = useState<Set<string>>(() => new Set());
+
+  const activeMeta = useMemo(
+    () => META_COLUMNS.filter((m) => !excludedMeta.has(m.key)),
+    [excludedMeta],
+  );
+  const toggleMeta = (key: string) =>
+    setExcludedMeta((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   // Only the selected columns/data points go into every export format.
   const activeFields = useMemo(
@@ -164,6 +187,7 @@ function ExportPage() {
     fields: activeFields,
     papers: filteredPapers,
     experiments: filteredExps,
+    meta: activeMeta,
   };
 
   const toggleAlloy = (id: string) =>
@@ -196,17 +220,7 @@ function ExportPage() {
       if (!p) continue;
       records.push({
         experiment_id: e.id,
-        paper: {
-          id: p.id,
-          citation_key: p.citation_key,
-          author: p.author,
-          year: p.year,
-          title: p.title,
-          doi: p.doi,
-          journal: p.journal,
-          abstract: p.abstract,
-          summary: p.summary,
-        },
+        paper: { id: p.id, ...paperMetaRecord(p, activeMeta) },
         label: e.label,
         alloy_type: alloyTypeOf(e) || null,
         fields: Object.fromEntries(
@@ -225,7 +239,7 @@ function ExportPage() {
       });
     }
     return { schema, records };
-  }, [filteredPapers, filteredExps, activeFields]);
+  }, [filteredPapers, filteredExps, activeFields, activeMeta]);
 
   const jsonl = useMemo(
     () => [schema, ...records].map((x) => JSON.stringify(x)).join("\n"),
@@ -246,6 +260,31 @@ function ExportPage() {
   const downloadJson = () => downloadBlob(jsonDoc, "application/json", "json");
   const downloadCsv = () => downloadBlob(buildCsv(exportData), "text/csv", "csv");
 
+  // Metadata-only: one row/record per paper, just the selected metadata columns.
+  const papersMetaJson = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          $meta: "papers",
+          generated_at: new Date().toISOString(),
+          columns: activeMeta.map((m) => ({ key: m.key, label: m.label })),
+          papers: filteredPapers.map((p) => ({ id: p.id, ...paperMetaRecord(p, activeMeta) })),
+        },
+        null,
+        2,
+      ),
+    [filteredPapers, activeMeta],
+  );
+  const downloadMetaCsv = () =>
+    downloadBlob(buildPapersCsv(filteredPapers, activeMeta), "text/csv", "csv");
+  const downloadMetaJson = () => downloadBlob(papersMetaJson, "application/json", "json");
+  const downloadMetaXlsx = () =>
+    downloadPapersXlsx(
+      filteredPapers,
+      activeMeta,
+      `corrosion_metadata_${new Date().toISOString().slice(0, 10)}.xlsx`,
+    );
+
   const recordCount = filteredExps.length;
   const hasNoAlloy = useMemo(() => experiments.some((e) => !alloyTypeOf(e)), [experiments]);
 
@@ -255,8 +294,10 @@ function ExportPage() {
       <p className="mt-3 text-sm text-muted-foreground max-w-2xl">
         Machine-readable <strong>JSONL</strong>, <strong>JSON</strong>, or <strong>CSV</strong> for
         AI training and reuse, a human-readable <strong>XLSX</strong> reproducing the column groups,
-        and a printable <strong>PDF report</strong>. All formats respect the filters below — alloy
-        type, search, field state, and which columns / data points to include.
+        and a printable <strong>PDF report</strong> — or export the{" "}
+        <strong>paper metadata alone</strong>, one row per paper. All formats respect the filters
+        below — alloy type, search, field state, and which metadata columns and data points to
+        include.
       </p>
 
       <div className="mt-6 rounded-lg border border-rule bg-card p-4">
@@ -316,6 +357,54 @@ function ExportPage() {
           {selectedAlloys.size === 0 && !search && stateFilter === "any"
             ? `All ${filteredPapers.length} papers · ${recordCount} experiments included.`
             : `${filteredPapers.length} papers · ${recordCount} experiments match the current filter.`}
+        </p>
+      </div>
+
+      <div className="mt-6 rounded-lg border border-rule bg-card p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+            Paper metadata to include
+          </h3>
+          <div className="flex items-center gap-3 text-[11px]">
+            <span className="text-muted-foreground">
+              {activeMeta.length}/{META_COLUMNS.length} fields
+            </span>
+            <button
+              onClick={() => setExcludedMeta(new Set())}
+              className="text-copper hover:underline"
+            >
+              All
+            </button>
+            <button
+              onClick={() => setExcludedMeta(new Set(META_COLUMNS.map((m) => m.key)))}
+              className="text-copper hover:underline"
+            >
+              None
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {META_COLUMNS.map((m) => {
+            const on = !excludedMeta.has(m.key);
+            return (
+              <button
+                key={m.key}
+                onClick={() => toggleMeta(m.key)}
+                className={
+                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors " +
+                  (on
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-rule text-muted-foreground hover:bg-accent")
+                }
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-3 text-[11px] text-muted-foreground">
+          These bibliographic columns appear in every format below, and are the columns used by the
+          metadata-only export. Turn any off to leave it out.
         </p>
       </div>
 
@@ -396,12 +485,14 @@ function ExportPage() {
           })}
         </div>
         <p className="mt-3 text-[11px] text-muted-foreground">
-          Paper columns (author, year, DOI, summary, notes…) are always included. These toggles
-          control which experiment data points appear in every format below.
+          These toggles control which experiment data points appear in every format below. Paper
+          metadata columns are chosen separately, above.
         </p>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+      <h2 className="mt-8 text-2xl font-serif italic">Full dataset</h2>
+      <p className="text-[11px] text-muted-foreground">One row/record per experiment.</p>
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
         <FormatCard
           icon={<FileJson className="h-5 w-5" />}
           title="JSONL"
@@ -444,6 +535,39 @@ function ExportPage() {
         />
       </div>
 
+      <h2 className="mt-8 text-2xl font-serif italic">Metadata only</h2>
+      <p className="text-[11px] text-muted-foreground">
+        One row/record per paper — just the selected bibliographic columns, no experiment data.{" "}
+        {filteredPapers.length} paper{filteredPapers.length === 1 ? "" : "s"} · {activeMeta.length}{" "}
+        column{activeMeta.length === 1 ? "" : "s"}.
+      </p>
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+        <FormatCard
+          icon={<Table className="h-5 w-5" />}
+          title="Metadata CSV"
+          desc="One row per paper with the chosen metadata columns — opens anywhere, re-imports here."
+          action="Download .csv"
+          onClick={downloadMetaCsv}
+          disabled={activeMeta.length === 0}
+        />
+        <FormatCard
+          icon={<FileSpreadsheet className="h-5 w-5" />}
+          title="Metadata XLSX"
+          desc="A single sheet of paper metadata, one row per paper."
+          action="Download .xlsx"
+          onClick={downloadMetaXlsx}
+          disabled={activeMeta.length === 0}
+        />
+        <FormatCard
+          icon={<FileText className="h-5 w-5" />}
+          title="Metadata JSON"
+          desc="A { columns, papers } document of the selected metadata, one object per paper."
+          action="Download .json"
+          onClick={downloadMetaJson}
+          disabled={activeMeta.length === 0}
+        />
+      </div>
+
       <div className="mt-6 rounded-lg border border-rule bg-card p-5 space-y-4">
         <div className="grid grid-cols-3 gap-4 text-sm">
           <Stat label="Papers" value={filteredPapers.length} />
@@ -473,12 +597,14 @@ function FormatCard({
   desc,
   action,
   onClick,
+  disabled,
 }: {
   icon: React.ReactNode;
   title: string;
   desc: string;
   action: string;
   onClick: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="rounded-lg border border-rule bg-card p-4 flex flex-col">
@@ -489,7 +615,8 @@ function FormatCard({
       <p className="mt-2 text-xs text-muted-foreground flex-1">{desc}</p>
       <button
         onClick={onClick}
-        className="mt-3 inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
+        disabled={disabled}
+        className="mt-3 inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
       >
         {action}
       </button>

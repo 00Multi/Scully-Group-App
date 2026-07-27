@@ -1,15 +1,75 @@
-// Human-readable XLSX export reproducing the column-group layout, and a
-// printable PDF report grouped by alloy type. See PRD §F8.
+// Human-readable XLSX export reproducing the column-group layout, a printable
+// PDF report grouped by alloy type, plus flat CSV and metadata-only exports.
+// See PRD §F8.
 
 import * as XLSX from "xlsx";
 import type { Experiment, Paper } from "./db";
 import type { FieldDef, FieldValue, GroupDef } from "./fields";
+
+// A selectable paper-metadata column. `key` is either a top-level Paper column
+// or a key inside paper.meta (see metaValue).
+export interface MetaColumn {
+  key: string;
+  label: string;
+}
+
+// Canonical order of exportable metadata columns.
+export const META_COLUMNS: MetaColumn[] = [
+  { key: "citation_key", label: "Citation key" },
+  { key: "author", label: "Author" },
+  { key: "year", label: "Year" },
+  { key: "title", label: "Title" },
+  { key: "doi", label: "DOI" },
+  { key: "journal", label: "Journal" },
+  { key: "institution", label: "Institution" },
+  { key: "volume", label: "Volume" },
+  { key: "issue", label: "Issue" },
+  { key: "pages", label: "Pages" },
+  { key: "publisher", label: "Publisher" },
+  { key: "url", label: "URL" },
+  { key: "keywords", label: "Keywords" },
+  { key: "abstract", label: "Abstract" },
+  { key: "summary", label: "Summary" },
+  { key: "notes", label: "Notes" },
+];
+
+export function metaValue(p: Paper, key: string): string {
+  switch (key) {
+    case "citation_key":
+      return p.citation_key ?? "";
+    case "author":
+      return p.author ?? "";
+    case "year":
+      return p.year != null ? String(p.year) : "";
+    case "title":
+      return p.title ?? "";
+    case "doi":
+      return p.doi ?? "";
+    case "journal":
+      return p.journal ?? "";
+    case "institution":
+      return p.institution ?? "";
+    case "abstract":
+      return p.abstract ?? "";
+    case "summary":
+      return p.summary ?? "";
+    case "notes":
+      return p.notes ?? "";
+    default: {
+      const v = p.meta?.[key];
+      if (v == null) return "";
+      return Array.isArray(v) ? v.join("; ") : String(v);
+    }
+  }
+}
 
 export interface ExportData {
   groups: GroupDef[];
   fields: FieldDef[];
   papers: Paper[];
   experiments: Experiment[];
+  // Selected paper-metadata columns, in display order.
+  meta: MetaColumn[];
 }
 
 const ALLOY_TYPE_KEY = "alloy_type";
@@ -32,21 +92,25 @@ function fieldHeader(f: FieldDef): string {
   return f.unit ? `${f.label} (${f.unit})` : f.label;
 }
 
-export function downloadXlsx(data: ExportData, filename: string) {
-  const paperById = new Map(data.papers.map((p) => [p.id, p]));
-
-  const paperCols = ["Author", "Year", "Alloy type", "Title", "DOI", "Journal", "Experiment"];
-  // The alloy type is emitted as a dedicated paper-level column, so drop it from
-  // the group-band fields to avoid printing it twice.
-  const orderedFields = data.groups.flatMap((g) =>
+// Experiment data-point fields, excluding alloy_type (emitted as its own column).
+function orderedFieldsOf(data: ExportData): FieldDef[] {
+  return data.groups.flatMap((g) =>
     data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
   );
-  const tailCols = ["Summary", "Notes"];
+}
+
+export function downloadXlsx(data: ExportData, filename: string) {
+  const paperById = new Map(data.papers.map((p) => [p.id, p]));
+  const orderedFields = orderedFieldsOf(data);
 
   // Row 1: group band. Row 2: column labels.
   const band: string[] = [];
   const labels: string[] = [];
-  paperCols.forEach((c) => {
+  data.meta.forEach((m) => {
+    band.push("Paper");
+    labels.push(m.label);
+  });
+  ["Alloy type", "Experiment"].forEach((c) => {
     band.push("Paper");
     labels.push(c);
   });
@@ -55,10 +119,6 @@ export function downloadXlsx(data: ExportData, filename: string) {
     band.push(groupLabelById.get(f.group) ?? f.group);
     labels.push(fieldHeader(f));
   });
-  tailCols.forEach((c) => {
-    band.push(c);
-    labels.push(c);
-  });
 
   const aoa: (string | number | null)[][] = [band, labels];
 
@@ -66,16 +126,11 @@ export function downloadXlsx(data: ExportData, filename: string) {
     const p = paperById.get(exp.paper_id);
     if (!p) continue;
     const row: (string | number | null)[] = [
-      p.author,
-      p.year ?? "",
+      ...data.meta.map((m) => metaValue(p, m.key)),
       alloyTypeOf(exp),
-      p.title,
-      p.doi,
-      p.journal ?? "",
       exp.label,
     ];
     for (const f of orderedFields) row.push(displayValue(exp.values?.[f.key]));
-    row.push(p.summary ?? "", p.notes ?? "");
     aoa.push(row);
   }
 
@@ -107,41 +162,60 @@ function csvCell(s: unknown): string {
 
 export function buildCsv(data: ExportData): string {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const orderedFields = data.groups.flatMap((g) =>
-    data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
-  );
+  const orderedFields = orderedFieldsOf(data);
 
   const header = [
-    "Author",
-    "Year",
+    ...data.meta.map((m) => m.label),
     "Alloy type",
-    "Title",
-    "DOI",
-    "Journal",
     "Experiment",
     ...orderedFields.map(fieldHeader),
-    "Summary",
-    "Notes",
   ];
   const lines = [header.map(csvCell).join(",")];
   for (const exp of data.experiments) {
     const p = paperById.get(exp.paper_id);
     if (!p) continue;
     const row: unknown[] = [
-      p.author,
-      p.year ?? "",
+      ...data.meta.map((m) => metaValue(p, m.key)),
       alloyTypeOf(exp),
-      p.title,
-      p.doi,
-      p.journal ?? "",
       exp.label,
       ...orderedFields.map((f) => displayValue(exp.values?.[f.key])),
-      p.summary ?? "",
-      p.notes ?? "",
     ];
     lines.push(row.map(csvCell).join(","));
   }
   return lines.join("\r\n");
+}
+
+// ---------- Metadata-only exports (one row per paper) ----------
+
+export function buildPapersCsv(papers: Paper[], meta: MetaColumn[]): string {
+  const header = meta.map((m) => m.label);
+  const lines = [header.map(csvCell).join(",")];
+  for (const p of papers) {
+    lines.push(meta.map((m) => csvCell(metaValue(p, m.key))).join(","));
+  }
+  return lines.join("\r\n");
+}
+
+export function downloadPapersXlsx(papers: Paper[], meta: MetaColumn[], filename: string) {
+  const aoa: (string | number)[][] = [meta.map((m) => m.label)];
+  for (const p of papers) aoa.push(meta.map((m) => metaValue(p, m.key)));
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws["!cols"] = meta.map((m) => ({ wch: Math.min(Math.max(m.label.length + 2, 12), 50) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Paper metadata");
+  XLSX.writeFile(wb, filename);
+}
+
+// A typed paper-metadata record: year stays numeric, keywords stays an array.
+export function paperMetaRecord(p: Paper, meta: MetaColumn[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const m of meta) {
+    if (m.key === "year") out.year = p.year;
+    else if (m.key === "keywords")
+      out.keywords = Array.isArray(p.meta?.keywords) ? p.meta.keywords : [];
+    else out[m.key] = metaValue(p, m.key);
+  }
+  return out;
 }
 
 // ---------- Printable PDF report ----------
@@ -152,9 +226,7 @@ function esc(s: unknown): string {
 
 export function buildReportHtml(data: ExportData): string {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const orderedFields = data.groups.flatMap((g) =>
-    data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
-  );
+  const orderedFields = orderedFieldsOf(data);
 
   // Group experiments by their alloy type. One experiment belongs to exactly one
   // group (a paper's experiments can span several alloy types).
@@ -188,7 +260,10 @@ export function buildReportHtml(data: ExportData): string {
       if (p.id !== lastPaperId) {
         if (lastPaperId !== null) body += `</div>`;
         body += `<div class="paper"><h3>${esc(p.citation_key || p.author || "Untitled")}</h3>`;
-        const meta = [p.title, p.journal, p.year, p.doi].filter(Boolean).map(esc).join(" · ");
+        const meta = [p.title, p.journal, p.institution, p.year, p.doi]
+          .filter(Boolean)
+          .map(esc)
+          .join(" · ");
         if (meta) body += `<p class="meta">${meta}</p>`;
         if (p.summary) body += `<p class="summary">${esc(p.summary)}</p>`;
         lastPaperId = p.id;
