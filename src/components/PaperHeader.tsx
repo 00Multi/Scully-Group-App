@@ -8,6 +8,7 @@ import {
   useRemovePaperPdf,
 } from "@/lib/db";
 import { fetchCrossref, isLikelyDoi } from "@/lib/crossref";
+import { InstitutionEditor } from "./InstitutionEditor";
 import { FileUp, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 type Draft = {
@@ -16,7 +17,6 @@ type Draft = {
   title: string;
   doi: string;
   journal: string;
-  institution: string;
   abstract: string;
   summary: string;
   notes: string;
@@ -36,7 +36,6 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
     title: p.title,
     doi: p.doi,
     journal: p.journal ?? "",
-    institution: p.institution ?? "",
     abstract: p.abstract,
     summary: p.summary,
     notes: p.notes ?? "",
@@ -89,14 +88,12 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
       if (!state.author && r.authors) ((patch.author = r.authors), (nextAuto.author = true));
       if (state.year == null && r.year != null) ((patch.year = r.year), (nextAuto.year = true));
       if (!state.journal && r.journal) ((patch.journal = r.journal), (nextAuto.journal = true));
-      if (!state.institution && r.institution)
-        ((patch.institution = r.institution), (nextAuto.institution = true));
       if (!state.abstract && r.abstract)
         ((patch.abstract = r.abstract), (nextAuto.abstract = true));
       // Abstract copied into Summary if Summary is empty (PRD F2).
       if (!state.summary && r.abstract) ((patch.summary = r.abstract), (nextAuto.summary = true));
 
-      const meta = {
+      const meta: Record<string, unknown> = {
         ...(paper.meta ?? {}),
         authors_full: r.authorsFull,
         volume: r.volume,
@@ -109,6 +106,20 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
         crossref_fetched_at: new Date().toISOString(),
       };
 
+      // Institution lives in its own editor (paper.institution + meta.institutions).
+      // Seed it from Crossref affiliations only when it's currently empty.
+      const extra: Partial<Paper> = {};
+      let filledInstitution = false;
+      if (!paper.institution && r.institution) {
+        extra.institution = r.institution;
+        meta.institutions = r.institution
+          .split(/\s*;\s*/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((name) => ({ name }));
+        filledInstitution = true;
+      }
+
       const next = { ...state, ...patch };
       setState(next);
       setAuto(nextAuto);
@@ -118,9 +129,9 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           : r.citationKey || paper.citation_key;
       update.mutate({
         id: paper.id,
-        patch: { ...patch, citation_key, auto_filled: nextAuto, meta } as Partial<Paper>,
+        patch: { ...patch, ...extra, citation_key, auto_filled: nextAuto, meta } as Partial<Paper>,
       });
-      const filled = Object.keys(patch).length;
+      const filled = Object.keys(patch).length + (filledInstitution ? 1 : 0);
       setPrefillMsg(
         filled
           ? `Filled ${filled} empty field${filled === 1 ? "" : "s"} from Crossref.`
@@ -302,18 +313,11 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             className="w-full mt-1 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1"
           />
         </div>
-        <div>
+        <div className="md:col-span-2">
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
-            Institution {autoHint("institution")}
+            Institution(s)
           </label>
-          <input
-            value={state.institution}
-            onChange={(e) => setState({ ...state, institution: e.target.value })}
-            onBlur={() => commit({ institution: state.institution })}
-            onFocus={() => clearAuto("institution")}
-            placeholder="Affiliation / institution"
-            className="w-full mt-1 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1"
-          />
+          <InstitutionEditor paper={paper} />
         </div>
         <div className="md:col-span-2">
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">

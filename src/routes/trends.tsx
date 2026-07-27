@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { usePapers, useExperiments } from "@/lib/db";
 import { useSettings } from "@/lib/settings";
 import { TrendChart } from "@/components/TrendChart";
-import { buildTrendSections } from "@/lib/trends";
+import { InstitutionLogo } from "@/components/InstitutionLogo";
+import { buildTrendSections, institutionCounts } from "@/lib/trends";
 import { ArrowLeft, Search } from "lucide-react";
 
 export const Route = createFileRoute("/trends")({
@@ -50,6 +51,18 @@ function TrendsPage() {
 
   const totalCharts = sections.reduce((n, s) => n + s.trends.length, 0);
 
+  const institutions = useMemo(() => institutionCounts(papers), [papers]);
+  const filteredInstitutions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return institutions;
+    return institutions.filter(
+      (i) => i.name.toLowerCase().includes(q) || (i.countryName ?? "").toLowerCase().includes(q),
+    );
+  }, [institutions, query]);
+  const maxInstCount = filteredInstitutions.reduce((m, i) => Math.max(m, i.count), 0);
+  const nothingMatches =
+    totalCharts > 0 && filtered.length === 0 && filteredInstitutions.length === 0;
+
   return (
     <div className="max-w-[1600px] mx-auto px-6 py-8">
       <div className="mb-2">
@@ -85,10 +98,38 @@ function TrendsPage() {
         </div>
       )}
 
-      {totalCharts > 0 && filtered.length === 0 && (
+      {nothingMatches && (
         <div className="rounded-lg border border-dashed border-rule p-10 text-center text-sm text-muted-foreground italic">
-          No charts match “{query}”.
+          Nothing matches “{query}”.
         </div>
+      )}
+
+      {filteredInstitutions.length > 0 && (
+        <section className="mb-10">
+          <h2 className="text-2xl font-serif italic mb-3">Institutions</h2>
+          <div className="rounded-lg border border-rule bg-card divide-y divide-rule/60">
+            {filteredInstitutions.map((inst) => (
+              <div key={inst.name} className="flex items-center gap-3 px-4 py-2">
+                <InstitutionLogo inst={inst} size={22} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="truncate text-sm">{inst.name}</span>
+                    <span className="font-mono text-xs text-muted-foreground shrink-0">
+                      {inst.count} paper{inst.count === 1 ? "" : "s"}
+                      {inst.countryName ? ` · ${inst.countryName}` : ""}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-copper"
+                      style={{ width: `${maxInstCount ? (inst.count / maxInstCount) * 100 : 0}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       <div className="space-y-10">
