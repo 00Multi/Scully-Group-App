@@ -18,6 +18,35 @@ interface BrowseSearch {
   exp?: string;
 }
 
+// The Browse tab's selection/view is remembered across tab switches (Browse is
+// unmounted when you visit e.g. Export), so returning lands on the same paper.
+const BROWSE_STATE_KEY = "browse.ui.v1";
+interface BrowseUIState {
+  paperId: string | null;
+  expId: string | null;
+  mode: ViewMode;
+  userChoseMode: boolean;
+  search: string;
+  stateFilter: StateFilter;
+}
+function loadBrowseState(): Partial<BrowseUIState> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(BROWSE_STATE_KEY);
+    return raw ? (JSON.parse(raw) as Partial<BrowseUIState>) : null;
+  } catch {
+    return null;
+  }
+}
+function saveBrowseState(s: BrowseUIState) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(BROWSE_STATE_KEY, JSON.stringify(s));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 export const Route = createFileRoute("/browse")({
   validateSearch: (search: Record<string, unknown>): BrowseSearch => ({
     paper: typeof search.paper === "string" ? search.paper : undefined,
@@ -117,6 +146,8 @@ function BrowsePage() {
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
   const [mode, setMode] = useState<ViewMode>("data");
   const [userChoseMode, setUserChoseMode] = useState(false);
+  // Whether the one-time restore of persisted browse state has run.
+  const [restored, setRestored] = useState(false);
 
   // Persisted scroll position for the data form pane, so switching view modes
   // (which remounts the pane) does not reset the reader's place. (PRD F3)
@@ -130,6 +161,25 @@ function BrowsePage() {
 
   // Pending experiment id to scroll to once the pane has rendered.
   const pendingScrollExp = useRef<string | null>(null);
+
+  // One-time restore of the persisted browse selection/view (unless an incoming
+  // deep-link takes precedence). Runs client-side to avoid SSR hydration drift.
+  useEffect(() => {
+    const saved = !paperParam ? loadBrowseState() : null;
+    if (saved) {
+      if (saved.paperId) setSelectedId(saved.paperId);
+      if (saved.expId) {
+        setSelectedExpId(saved.expId);
+        pendingScrollExp.current = saved.expId;
+      }
+      if (saved.mode) setMode(saved.mode);
+      if (saved.userChoseMode) setUserChoseMode(true);
+      if (saved.search) setSearch(saved.search);
+      if (saved.stateFilter) setStateFilter(saved.stateFilter);
+    }
+    setRestored(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Apply an incoming deep-link (?paper=&exp=) once the data has loaded.
   useEffect(() => {
@@ -145,9 +195,26 @@ function BrowsePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paperParam, expParam, papers]);
 
+  // Fall back to the first paper only after restore, and also recover if the
+  // remembered paper no longer exists (e.g. it was deleted).
   useEffect(() => {
-    if (!selectedId && papers.length > 0) setSelectedId(papers[0].id);
-  }, [papers, selectedId]);
+    if (!restored || papers.length === 0) return;
+    if (selectedId && papers.some((p) => p.id === selectedId)) return;
+    setSelectedId(papers[0].id);
+  }, [restored, papers, selectedId]);
+
+  // Persist the browse selection/view so it survives leaving and returning.
+  useEffect(() => {
+    if (!restored) return;
+    saveBrowseState({
+      paperId: selectedId,
+      expId: selectedExpId,
+      mode,
+      userChoseMode,
+      search,
+      stateFilter,
+    });
+  }, [restored, selectedId, selectedExpId, mode, userChoseMode, search, stateFilter]);
 
   const selected = papers.find((p) => p.id === selectedId) ?? null;
   const selectedExps = useMemo(
