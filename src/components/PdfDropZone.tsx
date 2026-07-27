@@ -66,6 +66,7 @@ export function PdfDropZone({ onCreated }: { onCreated?: (paperId: string) => vo
         if (r.authors) ((patch.author = r.authors), (autoFilled.author = true));
         if (r.year != null) ((patch.year = r.year), (autoFilled.year = true));
         if (r.journal) ((patch.journal = r.journal), (autoFilled.journal = true));
+        if (r.institution) ((patch.institution = r.institution), (autoFilled.institution = true));
         if (r.abstract) {
           patch.abstract = r.abstract;
           patch.summary = r.abstract;
