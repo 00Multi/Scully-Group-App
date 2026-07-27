@@ -15,6 +15,7 @@ import { Route as BulkRouteImport } from './routes/bulk'
 import { Route as ExportRouteImport } from './routes/export'
 import { Route as ImportRouteImport } from './routes/import'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
+import { Route as ApiKeepAliveRouteImport } from './routes/api/keep-alive'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -46,6 +47,11 @@ const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   path: '/sitemap.xml',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiKeepAliveRoute = ApiKeepAliveRouteImport.update({
+  id: '/api/keep-alive',
+  path: '/api/keep-alive',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -54,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/export': typeof ExportRoute
   '/import': typeof ImportRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/keep-alive': typeof ApiKeepAliveRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +69,7 @@ export interface FileRoutesByTo {
   '/export': typeof ExportRoute
   '/import': typeof ImportRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/keep-alive': typeof ApiKeepAliveRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,12 +79,27 @@ export interface FileRoutesById {
   '/export': typeof ExportRoute
   '/import': typeof ImportRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
+  '/api/keep-alive': typeof ApiKeepAliveRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/browse' | '/bulk' | '/export' | '/import' | '/sitemap.xml'
+  fullPaths:
+    | '/'
+    | '/browse'
+    | '/bulk'
+    | '/export'
+    | '/import'
+    | '/sitemap.xml'
+    | '/api/keep-alive'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/browse' | '/bulk' | '/export' | '/import' | '/sitemap.xml'
+  to:
+    | '/'
+    | '/browse'
+    | '/bulk'
+    | '/export'
+    | '/import'
+    | '/sitemap.xml'
+    | '/api/keep-alive'
   id:
     | '__root__'
     | '/'
@@ -85,6 +108,7 @@ export interface FileRouteTypes {
     | '/export'
     | '/import'
     | '/sitemap.xml'
+    | '/api/keep-alive'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -94,6 +118,7 @@ export interface RootRouteChildren {
   ExportRoute: typeof ExportRoute
   ImportRoute: typeof ImportRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
+  ApiKeepAliveRoute: typeof ApiKeepAliveRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -140,6 +165,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SitemapDotxmlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/keep-alive': {
+      id: '/api/keep-alive'
+      path: '/api/keep-alive'
+      fullPath: '/api/keep-alive'
+      preLoaderRoute: typeof ApiKeepAliveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -150,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   ExportRoute: ExportRoute,
   ImportRoute: ImportRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
+  ApiKeepAliveRoute: ApiKeepAliveRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

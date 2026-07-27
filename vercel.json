@@ -1,5 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "NITRO_PRESET=vercel npm run build"
+  "buildCommand": "NITRO_PRESET=vercel npm run build",
+  "crons": [
+    {
+      "path": "/api/keep-alive",
+      "schedule": "0 8 * * *"
+    }
+  ]
 }
