@@ -47,8 +47,8 @@ export function DangerZone() {
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-medium">Delete all data and start fresh</h3>
           <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-            Permanently removes every paper, experiment, and uploaded PDF/image. Your material
-            categories and column setup are kept. This cannot be undone.
+            Permanently removes every paper, experiment, and uploaded PDF/image. Your column and
+            data-point setup is kept. This cannot be undone.
           </p>
           {result && <p className="mt-2 text-xs font-medium">{result}</p>}
         </div>
@@ -78,8 +78,7 @@ export function DangerZone() {
                 <AlertDialogDescription>
                   This permanently deletes{" "}
                   <strong>all papers, all experiments, and every uploaded PDF and image</strong>.
-                  Your material categories and column/data-point setup are kept. This cannot be
-                  undone.
+                  Your column/data-point setup is kept. This cannot be undone.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>

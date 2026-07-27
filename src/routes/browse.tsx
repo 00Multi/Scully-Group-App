@@ -29,12 +29,13 @@ export const Route = createFileRoute("/browse")({
       {
         name: "description",
         content:
-          "Browse molten-salt corrosion papers by material category and edit experiment-level data inline, with a split PDF + data view.",
+          "Browse molten-salt corrosion papers and edit experiment-level data inline, filter by alloy type, with a split PDF + data view.",
       },
       { property: "og:title", content: "Browse — Corrosion Literature Review" },
       {
         property: "og:description",
-        content: "Category → Paper → Experiment tree with inline editing and split PDF view.",
+        content:
+          "Paper → Experiment tree with alloy-type filtering, inline editing, and split PDF view.",
       },
     ],
   }),
