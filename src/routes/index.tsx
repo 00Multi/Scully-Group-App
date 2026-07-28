@@ -16,7 +16,7 @@ import { ArrowRight, Plus, RotateCcw, Trash2 } from "lucide-react";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Dashboard — Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:

@@ -54,7 +54,7 @@ export const Route = createFileRoute("/browse")({
   }),
   head: () => ({
     meta: [
-      { title: "Browse — Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:

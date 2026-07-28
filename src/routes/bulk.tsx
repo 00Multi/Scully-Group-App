@@ -8,7 +8,7 @@ import { Loader2 } from "lucide-react";
 export const Route = createFileRoute("/bulk")({
   head: () => ({
     meta: [
-      { title: "Bulk edit — Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:

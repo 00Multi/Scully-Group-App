@@ -8,7 +8,7 @@ import { FileSpreadsheet, Loader2, UploadCloud } from "lucide-react";
 export const Route = createFileRoute("/import")({
   head: () => ({
     meta: [
-      { title: "Import — Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:
