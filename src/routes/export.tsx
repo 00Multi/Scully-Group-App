@@ -59,7 +59,7 @@ function paperMatchesSearch(
 export const Route = createFileRoute("/export")({
   head: () => ({
     meta: [
-      { title: "Export — Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:

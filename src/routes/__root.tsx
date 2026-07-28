@@ -78,7 +78,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:
@@ -95,7 +95,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "alternate icon", href: "/favicon.ico", type: "image/x-icon" },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       {
@@ -165,11 +166,14 @@ function RootComponent() {
         <div className="min-h-screen flex flex-col">
           <header className="border-b border-rule bg-paper/80 backdrop-blur sticky top-0 z-20">
             <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
-              <Link to="/" className="flex items-baseline gap-2">
-                <span className="text-2xl font-serif italic">Corrosion</span>
-                <span className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                  Lit Review
+              <Link to="/" className="flex items-center gap-2">
+                <span
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black text-white font-serif italic text-xl leading-none"
+                  aria-hidden
+                >
+                  C
                 </span>
+                <span className="text-2xl font-serif italic">Corrosion</span>
               </Link>
               <nav className="flex items-center gap-1">
                 <NavLink to="/">Dashboard</NavLink>

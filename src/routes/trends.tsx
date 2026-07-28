@@ -10,7 +10,7 @@ import { ArrowLeft, Search } from "lucide-react";
 export const Route = createFileRoute("/trends")({
   head: () => ({
     meta: [
-      { title: "Trends — Corrosion Literature Review" },
+      { title: "Corrosion" },
       {
         name: "description",
         content:

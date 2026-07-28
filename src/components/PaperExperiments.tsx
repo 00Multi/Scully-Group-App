@@ -22,7 +22,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, Columns3, Copy, Layers, Plus, Rows3, Trash2 } from "lucide-react";
+import {
+  ChevronDown,
+  Columns3,
+  Copy,
+  GripVertical,
+  Layers,
+  Plus,
+  Rows3,
+  Trash2,
+} from "lucide-react";
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
 const VIEW_KEY = "paper.exp.view.v1";
@@ -343,6 +352,33 @@ export function PaperExperiments({
     if (baseIsExp) updateExp.mutate({ id: base, patch: { label } });
   };
 
+  // Drag-to-reorder for the experiment chips. `order` is a local view that
+  // resyncs from the store after each change, so it never diverges.
+  const posSig = experiments.map((e) => `${e.id}:${e.position}`).join("|");
+  const [order, setOrder] = useState<string[]>(() => experiments.map((e) => e.id));
+  useEffect(() => {
+    setOrder(experiments.map((e) => e.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [posSig]);
+  const dragId = useRef<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const reorder = (targetId: string) => {
+    const src = dragId.current;
+    dragId.current = null;
+    setOverId(null);
+    if (!src || src === targetId) return;
+    const next = order.filter((id) => id !== src);
+    const at = next.indexOf(targetId);
+    if (at < 0) return;
+    next.splice(at, 0, src);
+    setOrder(next);
+    // Persist the new positions (only those that actually changed).
+    next.forEach((id, i) => {
+      const e = experiments.find((x) => x.id === id);
+      if (e && e.position !== i) updateExp.mutate({ id, patch: { position: i } });
+    });
+  };
+
   if (experiments.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-rule p-6 text-sm text-muted-foreground italic flex items-center justify-between gap-3">
@@ -378,21 +414,43 @@ export function PaperExperiments({
           >
             <Layers className="h-3 w-3" /> All
           </button>
-          {experiments.map((e, i) => {
+          {order.map((id, i) => {
+            const e = experiments.find((x) => x.id === id);
+            if (!e) return null;
             const on = mode === "single" && e.id === base;
             return (
               <button
-                key={e.id}
+                key={id}
+                draggable
+                onDragStart={(ev) => {
+                  dragId.current = id;
+                  ev.dataTransfer.effectAllowed = "move";
+                }}
+                onDragOver={(ev) => {
+                  ev.preventDefault();
+                  if (overId !== id) setOverId(id);
+                }}
+                onDragLeave={() => setOverId((o) => (o === id ? null : o))}
+                onDrop={(ev) => {
+                  ev.preventDefault();
+                  reorder(id);
+                }}
+                onDragEnd={() => {
+                  dragId.current = null;
+                  setOverId(null);
+                }}
                 onClick={() => onActiveExp(e.id)}
                 className={
-                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors max-w-[14rem] " +
+                  "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs transition-colors max-w-[14rem] cursor-grab active:cursor-grabbing " +
                   (on
                     ? "border-transparent text-white"
-                    : "border-rule text-muted-foreground hover:bg-accent")
+                    : "border-rule text-muted-foreground hover:bg-accent") +
+                  (overId === id ? " ring-2 ring-copper" : "")
                 }
                 style={on ? { backgroundColor: expColor(i) } : undefined}
-                title={expName(e, i)}
+                title={`${expName(e, i)} — drag to reorder`}
               >
+                <GripVertical className="h-3 w-3 opacity-50" />
                 <Dot i={i} className={on ? "ring-1 ring-white/70" : ""} />
                 <span className="truncate">{expName(e, i)}</span>
               </button>
