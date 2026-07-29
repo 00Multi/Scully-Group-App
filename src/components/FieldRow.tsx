@@ -46,6 +46,15 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
     onChange({ ...value, state: s });
   };
 
+  // Enter commits the cell and drops the cursor (blur → onBlur commit), just
+  // like clicking away. Shift+Enter still inserts a newline in the textarea.
+  const commitOnEnter = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      e.currentTarget.blur();
+    }
+  };
+
   // Every field auto-fits its text (wrapping to more lines when needed) except
   // numbers, which stay on one line. Fields with options keep a compact
   // suggestion dropdown next to the box.
@@ -79,6 +88,7 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
             disabled={readOnly}
             onChange={(e) => setLocal(e.target.value)}
             onBlur={(e) => commit(e.target.value)}
+            onKeyDown={commitOnEnter}
             placeholder={placeholder}
             className={inputClass}
           />
@@ -90,6 +100,7 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
               disabled={readOnly}
               onChange={(e) => setLocal(e.target.value)}
               onBlur={(e) => commit(e.target.value)}
+              onKeyDown={commitOnEnter}
               rows={1}
               placeholder={placeholder}
               className={inputClass + (hasOptions && !readOnly ? " pr-5" : "")}

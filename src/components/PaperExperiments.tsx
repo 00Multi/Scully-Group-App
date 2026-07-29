@@ -172,6 +172,12 @@ function MultiCell({
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         onBlur={(e) => onChange(parseFieldInput(e.target.value, field, value))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
         placeholder={value.state === "na" ? "N/A" : "—"}
         className="w-full min-w-0 bg-transparent border-b border-input/60 focus:border-primary focus:outline-none text-xs py-0.5 font-mono"
       />
