@@ -307,11 +307,19 @@ export function PaperExperiments({
     const mode = effMode(key);
     if (mode === ALL) {
       const common = commonValue(key);
+      // When experiments hold differing values for this data point, "All" has no
+      // single value to show — and editing it would clobber those distinct
+      // per-experiment values. Render it empty and read-only until the
+      // experiment-specific values collapse back down to one.
+      const mixed = experiments.length >= 2 && common === null;
       return {
         mode: ALL,
-        value: common ?? valueOf(experiments[0]?.id ?? "", key),
-        commit: (v: FieldValue) => experiments.forEach((e) => setField(e.id, key, v)),
+        value: mixed ? MISSING_VALUE : (common ?? valueOf(experiments[0]?.id ?? "", key)),
+        commit: mixed
+          ? () => {}
+          : (v: FieldValue) => experiments.forEach((e) => setField(e.id, key, v)),
         imageExpId: baseIsExp ? base : (experiments[0]?.id ?? ""),
+        readOnly: mixed,
       };
     }
     return {
@@ -319,6 +327,7 @@ export function PaperExperiments({
       value: valueOf(mode, key),
       commit: (v: FieldValue) => setField(mode, key, v),
       imageExpId: mode,
+      readOnly: false,
     };
   };
 
@@ -557,6 +566,7 @@ function SingleView({
     value: FieldValue;
     commit: (v: FieldValue) => void;
     imageExpId: string;
+    readOnly: boolean;
   };
   setRowMode: (key: string, id: string) => void;
   rename: (label: string) => void;
@@ -647,6 +657,7 @@ function SingleView({
                     onChange={row.commit}
                     onDelete={onDelete}
                     expControl={selector}
+                    readOnly={row.readOnly}
                   />
                 ) : (
                   <FieldRow
@@ -656,6 +667,7 @@ function SingleView({
                     onChange={row.commit}
                     onDelete={onDelete}
                     expControl={selector}
+                    readOnly={row.readOnly}
                   />
                 );
               })}

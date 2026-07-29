@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SettingsProvider, useSettings } from "../lib/settings";
+import { useCollapsePasteWhitespace } from "../lib/paste";
 import { Moon, Sun } from "lucide-react";
 
 function NotFoundComponent() {
@@ -159,6 +160,9 @@ function ThemeToggle() {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  // Strip newlines/indentation from pasted text (e.g. abstracts copied from a
+  // PDF) across every text field in the app.
+  useCollapsePasteWhitespace();
 
   return (
     <QueryClientProvider client={queryClient}>
