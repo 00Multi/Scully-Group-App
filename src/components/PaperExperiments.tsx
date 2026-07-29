@@ -271,6 +271,11 @@ export function PaperExperiments({
   // Per-row overrides: which experiment (or ALL) each data point row applies to.
   const [rowExp, setRowExp] = useState<Record<string, string>>({});
   const setRowMode = (key: string, val: string) => setRowExp((r) => ({ ...r, [key]: val }));
+  // The tab (All, or a specific experiment) governs the whole panel, so clear
+  // any per-row experiment overrides whenever the active tab changes.
+  useEffect(() => {
+    setRowExp({});
+  }, [base]);
 
   // The value shared across every experiment for a field, or null if they differ.
   const commonValue = (key: string): FieldValue | null => {
@@ -294,10 +299,15 @@ export function PaperExperiments({
     const o = rowExp[key];
     if (o === ALL) return ALL;
     if (o && experiments.some((e) => e.id === o)) return o;
-    // Consistent-across-all data points always show as "all experiments"; the
-    // rest follow the base selection (which is "all" by default).
+    // Consistent-across-all data points always read as "all experiments".
     if (isSharedAcrossAll(key)) return ALL;
-    return base;
+    // The "All" tab shows every data point's all value (including a mixed one,
+    // which renders as "Varies by experiment").
+    if (base === ALL) return ALL;
+    // On a specific experiment's tab, show that experiment's own value only
+    // where it actually has one; a data point the experiment hasn't filled in
+    // falls back to the all value rather than a blank "missing" for it.
+    return valueOf(base, key).state === "missing" ? ALL : base;
   };
 
   // Resolve how a data-point row reads and writes: an "all experiments" row
