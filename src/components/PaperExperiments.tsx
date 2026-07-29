@@ -328,10 +328,22 @@ export function PaperExperiments({
   );
 
   const addExperiment = async () => {
+    // Seed the new experiment with only the data points that are currently
+    // shared ("all experiments") across every existing experiment, so those
+    // auto-fill instead of starting blank. Data points that vary between
+    // experiments get no entry at all — an experiment-specific value shouldn't
+    // exist, even as a blank, until the user creates one via the row dropdown.
+    const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
+    const seed: Record<string, FieldValue> = {};
+    for (const f of allFields) {
+      const c = commonValue(f.key);
+      if (c && c.state !== "missing") seed[f.key] = { ...c };
+    }
     const created = await createExp.mutateAsync({
       paper_id: paper.id,
       label: `Experiment ${experiments.length + 1}`,
       position: experiments.length,
+      values: Object.keys(seed).length ? seed : undefined,
     });
     if (created?.id) onActiveExp(created.id);
   };
