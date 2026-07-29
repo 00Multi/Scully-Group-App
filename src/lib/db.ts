@@ -26,6 +26,8 @@ export interface Paper {
   notes: string;
   meta: Record<string, unknown>;
   auto_filled: Record<string, boolean>;
+  // Field keys the user tagged as the variables studied in this paper.
+  variables: string[];
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +51,7 @@ function normalizePaper(row: any): Paper {
     notes: row?.notes ?? "",
     meta: row?.meta ?? {},
     auto_filled: row?.auto_filled ?? {},
+    variables: Array.isArray(row?.variables) ? row.variables : [],
   } as Paper;
 }
 
@@ -60,8 +63,6 @@ export interface Experiment {
   values: Record<string, FieldValue>;
   // A manual "reviewed / done" flag the user toggles per experiment.
   checked: boolean;
-  // Field keys the user has tagged as the variables studied in this experiment.
-  variables: string[];
   created_at: string;
   updated_at: string;
 }
@@ -195,7 +196,6 @@ export function useExperiments() {
         ...row,
         values: withDefaults(row.values),
         checked: row.checked ?? false,
-        variables: Array.isArray(row.variables) ? row.variables : [],
       })) as Experiment[];
     },
   });
