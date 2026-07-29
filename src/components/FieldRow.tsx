@@ -20,11 +20,14 @@ interface Props {
   // Optional control (e.g. a per-row experiment selector) shown before the state
   // badge. Lets each data-point row indicate which experiment it displays.
   expControl?: ReactNode;
+  // When true the field is shown empty and cannot be edited — used for an
+  // "All experiments" row whose experiments hold differing values.
+  readOnly?: boolean;
 }
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
 
-export function FieldRow({ field, value, onChange, onDelete, expControl }: Props) {
+export function FieldRow({ field, value, onChange, onDelete, expControl, readOnly }: Props) {
   const [local, setLocal] = useState<string>(
     value.value === null || value.value === undefined ? "" : String(value.value),
   );
@@ -49,7 +52,9 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
   const hasOptions = !!field.options?.length;
   const isNumber = field.type === "number";
   const inputClass =
-    "w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono";
+    "w-full bg-transparent border-0 border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono" +
+    (readOnly ? " opacity-60 italic cursor-not-allowed" : "");
+  const placeholder = readOnly ? "Varies by experiment" : value.state === "na" ? "N/A" : "—";
 
   return (
     <div className="group flex items-start gap-2 py-2 border-b border-rule/60 last:border-0">
@@ -68,12 +73,13 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
       <div className="flex flex-col gap-1 flex-1 min-w-0">
         {isNumber ? (
           <input
-            list={hasOptions ? `opts-${field.key}` : undefined}
+            list={hasOptions && !readOnly ? `opts-${field.key}` : undefined}
             inputMode={hasOptions ? undefined : "decimal"}
             value={local}
+            disabled={readOnly}
             onChange={(e) => setLocal(e.target.value)}
             onBlur={(e) => commit(e.target.value)}
-            placeholder={value.state === "na" ? "N/A" : "—"}
+            placeholder={placeholder}
             className={inputClass}
           />
         ) : (
@@ -81,13 +87,14 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
             <AutoTextarea
               autoOnly
               value={local}
+              disabled={readOnly}
               onChange={(e) => setLocal(e.target.value)}
               onBlur={(e) => commit(e.target.value)}
               rows={1}
-              placeholder={value.state === "na" ? "N/A" : "—"}
-              className={inputClass + (hasOptions ? " pr-5" : "")}
+              placeholder={placeholder}
+              className={inputClass + (hasOptions && !readOnly ? " pr-5" : "")}
             />
-            {hasOptions && (
+            {hasOptions && !readOnly && (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   className="absolute right-0 top-1 text-muted-foreground hover:text-foreground focus:outline-none"
@@ -131,21 +138,27 @@ export function FieldRow({ field, value, onChange, onDelete, expControl }: Props
       </div>
 
       <div className="flex items-center gap-1 pt-0.5 shrink-0">
-        <DropdownMenu>
-          <DropdownMenuTrigger className="focus:outline-none">
-            <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
-              <StateBadge state={value.state} />
-              <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
-            </span>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {STATES.map((s) => (
-              <DropdownMenuItem key={s} onSelect={() => setState(s)}>
-                {STATE_LABELS[s]}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {readOnly ? (
+          <span className="inline-flex items-center whitespace-nowrap opacity-50">
+            <StateBadge state="missing" />
+          </span>
+        ) : (
+          <DropdownMenu>
+            <DropdownMenuTrigger className="focus:outline-none">
+              <span className="inline-flex items-center gap-0.5 whitespace-nowrap">
+                <StateBadge state={value.state} />
+                <ChevronDown className="h-3 w-3 text-muted-foreground shrink-0" />
+              </span>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {STATES.map((s) => (
+                <DropdownMenuItem key={s} onSelect={() => setState(s)}>
+                  {STATE_LABELS[s]}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {onDelete && (
           <button
             onClick={onDelete}
