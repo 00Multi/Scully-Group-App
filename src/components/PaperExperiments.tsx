@@ -143,7 +143,8 @@ function MultiCell({
   const [local, setLocal] = useState(value.value == null ? "" : String(value.value));
   useEffect(() => {
     setLocal(value.value == null ? "" : String(value.value));
-  }, [value.value]);
+    // value.state re-syncs the box to empty when it's cleared to N/A.
+  }, [value.value, value.state]);
 
   if (field.type === "image") {
     const url = typeof value.value === "string" && value.value ? value.value : null;
@@ -172,10 +173,19 @@ function MultiCell({
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         onBlur={(e) => onChange(parseFieldInput(e.target.value, field, value))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+        }}
         placeholder={value.state === "na" ? "N/A" : "—"}
         className="w-full min-w-0 bg-transparent border-b border-input/60 focus:border-primary focus:outline-none text-xs py-0.5 font-mono"
       />
-      <StateSelect value={value} onChange={onChange} />
+      <StateSelect
+        value={value}
+        onChange={(v) => onChange(v.state === "na" ? { ...v, value: null } : v)}
+      />
     </div>
   );
 }
@@ -271,6 +281,15 @@ export function PaperExperiments({
   // Per-row overrides: which experiment (or ALL) each data point row applies to.
   const [rowExp, setRowExp] = useState<Record<string, string>>({});
   const setRowMode = (key: string, val: string) => setRowExp((r) => ({ ...r, [key]: val }));
+  // The tab (All, or a specific experiment) governs the whole panel, so clear
+  // any per-row experiment overrides whenever the active tab changes. Reset
+  // synchronously during render (not in an effect) so no row lingers on the
+  // previous experiment for a frame after switching tabs.
+  const [rowExpBase, setRowExpBase] = useState(base);
+  if (rowExpBase !== base) {
+    setRowExpBase(base);
+    setRowExp({});
+  }
 
   // The value shared across every experiment for a field, or null if they differ.
   const commonValue = (key: string): FieldValue | null => {
@@ -294,10 +313,15 @@ export function PaperExperiments({
     const o = rowExp[key];
     if (o === ALL) return ALL;
     if (o && experiments.some((e) => e.id === o)) return o;
-    // Consistent-across-all data points always show as "all experiments"; the
-    // rest follow the base selection (which is "all" by default).
+    // Consistent-across-all data points always read as "all experiments".
     if (isSharedAcrossAll(key)) return ALL;
-    return base;
+    // The "All" tab shows every data point's all value (including a mixed one,
+    // which renders as "Varies by experiment").
+    if (base === ALL) return ALL;
+    // On a specific experiment's tab, show that experiment's own value only
+    // where it actually has one; a data point the experiment hasn't filled in
+    // falls back to the all value rather than a blank "missing" for it.
+    return valueOf(base, key).state === "missing" ? ALL : base;
   };
 
   // Resolve how a data-point row reads and writes: an "all experiments" row
@@ -659,9 +683,13 @@ function SingleView({
                   )
                     deleteField(f.key);
                 };
+                // Key by the resolved experiment so the editor always shows a
+                // fresh box for whichever experiment the row now points at —
+                // otherwise a cell can keep stale text after switching tabs
+                // (e.g. one that was edited and then cleared).
                 return f.type === "image" ? (
                   <ImageFieldRow
-                    key={f.key}
+                    key={`${f.key}:${row.mode}`}
                     field={f}
                     value={row.value}
                     paperId={paper.id}
@@ -673,7 +701,7 @@ function SingleView({
                   />
                 ) : (
                   <FieldRow
-                    key={f.key}
+                    key={`${f.key}:${row.mode}`}
                     field={f}
                     value={row.value}
                     onChange={row.commit}

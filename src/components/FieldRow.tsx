@@ -36,14 +36,26 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
   useEffect(() => {
     setLocal(value.value === null || value.value === undefined ? "" : String(value.value));
     setNote(value.note ?? "");
-  }, [value.value, value.note]);
+    // value.state is a dependency so that clearing to N/A (which leaves the
+    // value null) re-syncs the box to empty and reveals the greyed N/A.
+  }, [value.value, value.note, value.state]);
 
   const commit = (raw: string) => {
     onChange(parseFieldInput(raw, field, value));
   };
 
   const setState = (s: FieldState) => {
-    onChange({ ...value, state: s });
+    // Selecting N/A overrides whatever was written with a greyed-out N/A.
+    onChange(s === "na" ? { ...value, state: "na", value: null } : { ...value, state: s });
+  };
+
+  // Enter commits the cell and drops the cursor (blur → onBlur commit), just
+  // like clicking away. Shift+Enter still inserts a newline in the textarea.
+  const commitOnEnter = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      e.currentTarget.blur();
+    }
   };
 
   // Every field auto-fits its text (wrapping to more lines when needed) except
@@ -79,6 +91,7 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
             disabled={readOnly}
             onChange={(e) => setLocal(e.target.value)}
             onBlur={(e) => commit(e.target.value)}
+            onKeyDown={commitOnEnter}
             placeholder={placeholder}
             className={inputClass}
           />
@@ -90,6 +103,7 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
               disabled={readOnly}
               onChange={(e) => setLocal(e.target.value)}
               onBlur={(e) => commit(e.target.value)}
+              onKeyDown={commitOnEnter}
               rows={1}
               placeholder={placeholder}
               className={inputClass + (hasOptions && !readOnly ? " pr-5" : "")}
