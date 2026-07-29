@@ -171,6 +171,24 @@ function keywordDistribution(papers: Paper[], topN = 8): Bucket[] {
 
 const fieldTitle = (f: FieldDef) => (f.unit ? `${f.label} (${f.unit})` : f.label);
 
+// How many experiments tagged each data point as a "variable studied" (the
+// per-experiment Variables multi-select). Unknown keys are shown verbatim.
+export function variablesDistribution(
+  experiments: Experiment[],
+  fieldDefs: FieldDef[],
+  topN = 12,
+): Bucket[] {
+  const labelByKey = new Map(fieldDefs.map((f) => [f.key, fieldTitle(f)]));
+  const m = new Map<string, number>();
+  for (const e of experiments) {
+    for (const key of e.variables ?? []) {
+      const label = labelByKey.get(key) ?? key;
+      m.set(label, (m.get(label) ?? 0) + 1);
+    }
+  }
+  return topWithOther(Array.from(m.entries()), topN);
+}
+
 // Every chartable dimension, grouped into a Metadata section plus one section
 // per schema column. Trends with no data are dropped.
 export function buildTrendSections(
@@ -194,6 +212,16 @@ export function buildTrendSections(
     { id: "meta:keywords", title: "Keywords", data: keywordDistribution(papers) },
   ].filter((t) => t.data.length > 0);
   if (meta.length) sections.push({ id: "metadata", label: "Metadata", trends: meta });
+
+  // Variables studied (the per-experiment Variables tags).
+  const variables = variablesDistribution(experiments, fieldDefs);
+  if (variables.length) {
+    sections.push({
+      id: "variables",
+      label: "Variables studied",
+      trends: [{ id: "variables:all", title: "Experiments per variable", data: variables }],
+    });
+  }
 
   for (const g of groups) {
     const trends: TrendSpec[] = [];

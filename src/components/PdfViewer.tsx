@@ -50,6 +50,30 @@ interface Sel {
   h: number;
 }
 
+// Remember which page each paper's PDF was left on, so switching between the
+// Data/Split/Paper tabs (which remount the viewer) or opening another paper and
+// coming back restores the reader's place. Backed by localStorage so it also
+// survives a reload.
+const PAGE_MEM_KEY = "pdf.page.v1";
+function loadPageMem(): Record<string, number> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(PAGE_MEM_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+const pageMemory: Record<string, number> = loadPageMem();
+function rememberPage(paperId: string, page: number) {
+  pageMemory[paperId] = page;
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PAGE_MEM_KEY, JSON.stringify(pageMemory));
+  } catch {
+    /* ignore quota errors */
+  }
+}
+
 export function PdfViewer({ paper }: { paper: Paper }) {
   const url = paper.pdf_path ? pdfPublicUrl(paper.pdf_path) : null;
   const snip = useSnip();
@@ -59,20 +83,26 @@ export function PdfViewer({ paper }: { paper: Paper }) {
   const renderTaskRef = useRef<PdfRenderTask | null>(null);
 
   const [numPages, setNumPages] = useState(0);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(() => pageMemory[paper.id] ?? 1);
   const [scale, setScale] = useState(1.2);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Persist the current page for this paper whenever it changes.
+  useEffect(() => {
+    rememberPage(paper.id, page);
+  }, [paper.id, page]);
 
   // Selection rectangle (in canvas CSS pixels) while snipping.
   const [drag, setDrag] = useState<Sel | null>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
 
-  // Load the document when the URL changes.
+  // Load the document when the URL changes. Restore the remembered page for
+  // this paper rather than jumping back to page 1.
   useEffect(() => {
     let cancelled = false;
     setNumPages(0);
-    setPage(1);
+    setPage(pageMemory[paper.id] ?? 1);
     setError(null);
     docRef.current = null;
     if (!url) return;
@@ -84,6 +114,8 @@ export function PdfViewer({ paper }: { paper: Paper }) {
         if (cancelled) return;
         docRef.current = doc;
         setNumPages(doc.numPages);
+        // Clamp a remembered page that's now out of range.
+        setPage((p) => Math.min(Math.max(1, p), doc.numPages));
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Could not load the PDF.");
       } finally {
@@ -93,7 +125,7 @@ export function PdfViewer({ paper }: { paper: Paper }) {
     return () => {
       cancelled = true;
     };
-  }, [url]);
+  }, [url, paper.id]);
 
   // Render the current page whenever it, the scale, or the document changes.
   useEffect(() => {
@@ -266,7 +298,10 @@ export function PdfViewer({ paper }: { paper: Paper }) {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 overflow-auto bg-muted/30 flex justify-center p-3">
+      <div
+        className="flex-1 min-h-0 overflow-auto bg-muted/30 flex p-3"
+        style={{ justifyContent: "safe center" }}
+      >
         {loading && (
           <div className="self-center flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Loading PDF…
@@ -282,9 +317,7 @@ export function PdfViewer({ paper }: { paper: Paper }) {
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              className={
-                "shadow-md bg-white max-w-full h-auto " + (snip.active ? "cursor-crosshair" : "")
-              }
+              className={"shadow-md bg-white block " + (snip.active ? "cursor-crosshair" : "")}
             />
             {drag && (
               <div

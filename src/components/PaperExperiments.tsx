@@ -23,14 +23,19 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  Check,
+  CheckCircle2,
   ChevronDown,
+  Circle,
   Columns3,
   Copy,
   GripVertical,
   Layers,
+  ListChecks,
   Plus,
   Rows3,
   Trash2,
+  X,
 } from "lucide-react";
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
@@ -65,10 +70,14 @@ function ExperimentSelect({
   experiments,
   valueId,
   onChange,
+  hasValue,
 }: {
   experiments: Experiment[];
   valueId: string;
   onChange: (id: string) => void;
+  // Whether a given experiment currently has a value for this data point, so
+  // the menu can flag each with a green check (filled) or red ✗ (missing).
+  hasValue?: (expId: string) => boolean;
 }) {
   const isAll = valueId === ALL;
   const idx = experiments.findIndex((e) => e.id === valueId);
@@ -95,12 +104,86 @@ function ExperimentSelect({
           All experiments
         </DropdownMenuItem>
         {experiments.length > 0 && <div className="my-1 h-px bg-rule/60" />}
-        {experiments.map((e, i) => (
-          <DropdownMenuItem key={e.id} onSelect={() => onChange(e.id)} className="gap-2">
-            <Dot i={i} />
-            <span className="truncate max-w-[16rem]">{expName(e, i)}</span>
-          </DropdownMenuItem>
-        ))}
+        {experiments.map((e, i) => {
+          const filled = hasValue?.(e.id);
+          return (
+            <DropdownMenuItem key={e.id} onSelect={() => onChange(e.id)} className="gap-2">
+              <Dot i={i} />
+              <span className="truncate max-w-[16rem]">{expName(e, i)}</span>
+              {hasValue &&
+                (filled ? (
+                  <Check className="h-3.5 w-3.5 ml-auto text-state-filled" />
+                ) : (
+                  <X className="h-3.5 w-3.5 ml-auto text-destructive" />
+                ))}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ---- Per-experiment multi-select of the "variables" studied ----
+// Lets the user tag each experiment with which data points it varied/studied,
+// picked from the full schema. Surfaced as a distribution on the Trends page.
+function VariablesSelect({
+  fields,
+  selected,
+  onToggle,
+}: {
+  fields: FieldDef[];
+  selected: string[];
+  onToggle: (key: string) => void;
+}) {
+  const set = new Set(selected);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="focus:outline-none"
+        title="Variables studied in this experiment"
+      >
+        <span className="inline-flex items-center gap-1 rounded border border-rule px-2 py-1 text-xs hover:bg-accent">
+          <ListChecks className="h-3.5 w-3.5 text-copper" />
+          Variables
+          {selected.length > 0 && (
+            <span className="rounded-full bg-copper/15 text-copper px-1.5 text-[10px] font-mono">
+              {selected.length}
+            </span>
+          )}
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        </span>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 overflow-auto">
+        {fields.map((f) => {
+          const on = set.has(f.key);
+          return (
+            <DropdownMenuItem
+              key={f.key}
+              // Keep the menu open while toggling multiple variables.
+              onSelect={(ev) => {
+                ev.preventDefault();
+                onToggle(f.key);
+              }}
+              className="gap-2"
+            >
+              <span
+                className={
+                  "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border " +
+                  (on ? "bg-copper border-copper text-white" : "border-rule")
+                }
+              >
+                {on && <Check className="h-3 w-3" />}
+              </span>
+              <span className="truncate max-w-[16rem]">{f.label}</span>
+            </DropdownMenuItem>
+          );
+        })}
+        {fields.length === 0 && (
+          <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
+            No data points yet.
+          </div>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -309,19 +392,26 @@ export function PaperExperiments({
     return !!c && c.state !== "missing";
   };
 
+  // Whether a specific experiment has a (non-missing) value for a data point.
+  const fieldFilled = (expId: string, key: string): boolean =>
+    valueOf(expId, key).state !== "missing";
+  // Whether any experiment has a value for this data point.
+  const anyFilled = (key: string): boolean => experiments.some((e) => fieldFilled(e.id, key));
+
   const effMode = (key: string): string => {
     const o = rowExp[key];
     if (o === ALL) return ALL;
     if (o && experiments.some((e) => e.id === o)) return o;
     // Consistent-across-all data points always read as "all experiments".
     if (isSharedAcrossAll(key)) return ALL;
-    // The "All" tab shows every data point's all value (including a mixed one,
-    // which renders as "Varies by experiment").
+    // The "All" tab shows every data point's all value — including a mixed one,
+    // which renders as "Varies by experiment". That label ONLY appears here.
     if (base === ALL) return ALL;
-    // On a specific experiment's tab, show that experiment's own value only
-    // where it actually has one; a data point the experiment hasn't filled in
-    // falls back to the all value rather than a blank "missing" for it.
-    return valueOf(base, key).state === "missing" ? ALL : base;
+    // On a specific experiment's tab we never surface "Varies by experiment":
+    //  - if some experiment has a value here, show this experiment's own cell
+    //    (its value, or a blank Missing cell to fill in for this experiment);
+    //  - if no experiment has a value, fall back to the shared "all" cell.
+    return anyFilled(key) ? base : ALL;
   };
 
   // Resolve how a data-point row reads and writes: an "all experiments" row
@@ -407,6 +497,14 @@ export function PaperExperiments({
   }, [posSig]);
   const dragId = useRef<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const persistOrder = (next: string[]) => {
+    setOrder(next);
+    // Persist the new positions (only those that actually changed).
+    next.forEach((id, i) => {
+      const e = experiments.find((x) => x.id === id);
+      if (e && e.position !== i) updateExp.mutate({ id, patch: { position: i } });
+    });
+  };
   const reorder = (targetId: string) => {
     const src = dragId.current;
     dragId.current = null;
@@ -416,12 +514,22 @@ export function PaperExperiments({
     const at = next.indexOf(targetId);
     if (at < 0) return;
     next.splice(at, 0, src);
-    setOrder(next);
-    // Persist the new positions (only those that actually changed).
-    next.forEach((id, i) => {
-      const e = experiments.find((x) => x.id === id);
-      if (e && e.position !== i) updateExp.mutate({ id, patch: { position: i } });
-    });
+    persistOrder(next);
+  };
+  // Move an experiment to the far-left column (used by Compare-view tab clicks).
+  const moveToFront = (id: string) => {
+    if (order[0] === id) return;
+    persistOrder([id, ...order.filter((x) => x !== id)]);
+  };
+
+  // Per-experiment manual "reviewed" checkmark and the "variables studied" tags.
+  const setChecked = (id: string, checked: boolean) => updateExp.mutate({ id, patch: { checked } });
+  const toggleVariable = (id: string, key: string) => {
+    const e = experiments.find((x) => x.id === id);
+    if (!e) return;
+    const cur = e.variables ?? [];
+    const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+    updateExp.mutate({ id, patch: { variables: next } });
   };
 
   if (experiments.length === 0) {
@@ -484,7 +592,12 @@ export function PaperExperiments({
                   dragId.current = null;
                   setOverId(null);
                 }}
-                onClick={() => onActiveExp(e.id)}
+                onClick={() => {
+                  onActiveExp(e.id);
+                  // In Compare view, clicking a tab pulls that experiment to the
+                  // far-left column.
+                  if (mode === "multi") moveToFront(e.id);
+                }}
                 className={
                   "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs transition-colors max-w-[14rem] cursor-grab active:cursor-grabbing " +
                   (on
@@ -493,11 +606,16 @@ export function PaperExperiments({
                   (overId === id ? " ring-2 ring-copper" : "")
                 }
                 style={on ? { backgroundColor: expColor(i) } : undefined}
-                title={`${expName(e, i)} — drag to reorder`}
+                title={`${expName(e, i)} — click to ${mode === "multi" ? "move to front" : "focus"}, drag to reorder`}
               >
                 <GripVertical className="h-3 w-3 opacity-50" />
                 <Dot i={i} className={on ? "ring-1 ring-white/70" : ""} />
                 <span className="truncate">{expName(e, i)}</span>
+                {e.checked && (
+                  <Check
+                    className={"h-3 w-3 shrink-0 " + (on ? "text-white" : "text-state-filled")}
+                  />
+                )}
               </button>
             );
           })}
@@ -546,6 +664,7 @@ export function PaperExperiments({
           fieldsByGroup={fieldsByGroup}
           resolveRow={resolveRow}
           setRowMode={setRowMode}
+          fieldFilled={fieldFilled}
           rename={renameBase}
           duplicate={() => {
             const e = experiments[baseIndex];
@@ -554,6 +673,16 @@ export function PaperExperiments({
           onDeleteExp={() => {
             const e = experiments[baseIndex];
             if (e) remove(e);
+          }}
+          checked={experiments[baseIndex]?.checked ?? false}
+          onToggleChecked={() => {
+            const e = experiments[baseIndex];
+            if (e) setChecked(e.id, !e.checked);
+          }}
+          variables={experiments[baseIndex]?.variables ?? []}
+          onToggleVariable={(key) => {
+            const e = experiments[baseIndex];
+            if (e) toggleVariable(e.id, key);
           }}
           addField={addField}
           deleteField={deleteField}
@@ -569,6 +698,7 @@ export function PaperExperiments({
           onDuplicate={duplicate}
           onRemove={remove}
           onRename={(id, label) => updateExp.mutate({ id, patch: { label } })}
+          onToggleChecked={setChecked}
         />
       )}
     </div>
@@ -585,9 +715,14 @@ function SingleView({
   fieldsByGroup,
   resolveRow,
   setRowMode,
+  fieldFilled,
   rename,
   duplicate,
   onDeleteExp,
+  checked,
+  onToggleChecked,
+  variables,
+  onToggleVariable,
   addField,
   deleteField,
 }: {
@@ -605,12 +740,18 @@ function SingleView({
     readOnly: boolean;
   };
   setRowMode: (key: string, id: string) => void;
+  fieldFilled: (expId: string, key: string) => boolean;
   rename: (label: string) => void;
   duplicate: () => void;
   onDeleteExp: () => void;
+  checked: boolean;
+  onToggleChecked: () => void;
+  variables: string[];
+  onToggleVariable: (key: string) => void;
   addField: (groupId: string) => void;
   deleteField: (key: string) => void;
 }) {
+  const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   const baseIsExp = base !== ALL;
   const active = experiments[baseIndex];
   const [label, setLabel] = useState(active?.label ?? "");
@@ -633,6 +774,20 @@ function SingleView({
             placeholder={`Experiment ${baseIndex + 1}`}
             className="flex-1 bg-transparent text-lg font-serif italic focus:outline-none min-w-0"
           />
+          <VariablesSelect fields={allFields} selected={variables} onToggle={onToggleVariable} />
+          <button
+            onClick={onToggleChecked}
+            className={
+              "transition-colors p-1 " +
+              (checked
+                ? "text-state-filled hover:text-state-filled/80"
+                : "text-muted-foreground hover:text-state-filled")
+            }
+            title={checked ? "Marked reviewed — click to clear" : "Mark experiment reviewed"}
+            aria-label="Toggle reviewed"
+          >
+            {checked ? <CheckCircle2 className="h-4 w-4" /> : <Circle className="h-4 w-4" />}
+          </button>
           <button
             onClick={duplicate}
             className="text-muted-foreground hover:text-copper transition-colors p-1"
@@ -673,6 +828,7 @@ function SingleView({
                     experiments={experiments}
                     valueId={row.mode}
                     onChange={(id) => setRowMode(f.key, id)}
+                    hasValue={(expId) => fieldFilled(expId, f.key)}
                   />
                 );
                 const onDelete = () => {
@@ -744,6 +900,7 @@ function MultiView({
   onDuplicate,
   onRemove,
   onRename,
+  onToggleChecked,
 }: {
   experiments: Experiment[];
   orderedGroups: { id: string; label: string }[];
@@ -754,6 +911,7 @@ function MultiView({
   onDuplicate: (e: Experiment, i: number) => void;
   onRemove: (e: Experiment) => void;
   onRename: (id: string, label: string) => void;
+  onToggleChecked: (id: string, checked: boolean) => void;
 }) {
   const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   return (
@@ -790,6 +948,24 @@ function MultiView({
                     onCommit={(v) => onRename(e.id, v)}
                     onFocus={() => onActiveExp(e.id)}
                   />
+                  <button
+                    onClick={() => onToggleChecked(e.id, !e.checked)}
+                    className={
+                      "p-0.5 transition-colors " +
+                      (e.checked
+                        ? "text-state-filled hover:text-state-filled/80"
+                        : "text-muted-foreground hover:text-state-filled")
+                    }
+                    title={
+                      e.checked ? "Marked reviewed — click to clear" : "Mark experiment reviewed"
+                    }
+                  >
+                    {e.checked ? (
+                      <CheckCircle2 className="h-3 w-3" />
+                    ) : (
+                      <Circle className="h-3 w-3" />
+                    )}
+                  </button>
                   <button
                     onClick={() => onDuplicate(e, i)}
                     className="text-muted-foreground hover:text-copper p-0.5"

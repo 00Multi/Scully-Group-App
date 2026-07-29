@@ -58,6 +58,10 @@ export interface Experiment {
   label: string;
   position: number;
   values: Record<string, FieldValue>;
+  // A manual "reviewed / done" flag the user toggles per experiment.
+  checked: boolean;
+  // Field keys the user has tagged as the variables studied in this experiment.
+  variables: string[];
   created_at: string;
   updated_at: string;
 }
@@ -190,6 +194,8 @@ export function useExperiments() {
       return (data || []).map((row: any) => ({
         ...row,
         values: withDefaults(row.values),
+        checked: row.checked ?? false,
+        variables: Array.isArray(row.variables) ? row.variables : [],
       })) as Experiment[];
     },
   });
