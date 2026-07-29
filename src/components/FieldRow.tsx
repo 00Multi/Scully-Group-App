@@ -36,14 +36,17 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
   useEffect(() => {
     setLocal(value.value === null || value.value === undefined ? "" : String(value.value));
     setNote(value.note ?? "");
-  }, [value.value, value.note]);
+    // value.state is a dependency so that clearing to N/A (which leaves the
+    // value null) re-syncs the box to empty and reveals the greyed N/A.
+  }, [value.value, value.note, value.state]);
 
   const commit = (raw: string) => {
     onChange(parseFieldInput(raw, field, value));
   };
 
   const setState = (s: FieldState) => {
-    onChange({ ...value, state: s });
+    // Selecting N/A overrides whatever was written with a greyed-out N/A.
+    onChange(s === "na" ? { ...value, state: "na", value: null } : { ...value, state: s });
   };
 
   // Enter commits the cell and drops the cursor (blur → onBlur commit), just

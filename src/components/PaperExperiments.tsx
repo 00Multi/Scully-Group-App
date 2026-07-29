@@ -143,7 +143,8 @@ function MultiCell({
   const [local, setLocal] = useState(value.value == null ? "" : String(value.value));
   useEffect(() => {
     setLocal(value.value == null ? "" : String(value.value));
-  }, [value.value]);
+    // value.state re-syncs the box to empty when it's cleared to N/A.
+  }, [value.value, value.state]);
 
   if (field.type === "image") {
     const url = typeof value.value === "string" && value.value ? value.value : null;
@@ -181,7 +182,10 @@ function MultiCell({
         placeholder={value.state === "na" ? "N/A" : "—"}
         className="w-full min-w-0 bg-transparent border-b border-input/60 focus:border-primary focus:outline-none text-xs py-0.5 font-mono"
       />
-      <StateSelect value={value} onChange={onChange} />
+      <StateSelect
+        value={value}
+        onChange={(v) => onChange(v.state === "na" ? { ...v, value: null } : v)}
+      />
     </div>
   );
 }
