@@ -282,10 +282,14 @@ export function PaperExperiments({
   const [rowExp, setRowExp] = useState<Record<string, string>>({});
   const setRowMode = (key: string, val: string) => setRowExp((r) => ({ ...r, [key]: val }));
   // The tab (All, or a specific experiment) governs the whole panel, so clear
-  // any per-row experiment overrides whenever the active tab changes.
-  useEffect(() => {
+  // any per-row experiment overrides whenever the active tab changes. Reset
+  // synchronously during render (not in an effect) so no row lingers on the
+  // previous experiment for a frame after switching tabs.
+  const [rowExpBase, setRowExpBase] = useState(base);
+  if (rowExpBase !== base) {
+    setRowExpBase(base);
     setRowExp({});
-  }, [base]);
+  }
 
   // The value shared across every experiment for a field, or null if they differ.
   const commonValue = (key: string): FieldValue | null => {
@@ -679,9 +683,13 @@ function SingleView({
                   )
                     deleteField(f.key);
                 };
+                // Key by the resolved experiment so the editor always shows a
+                // fresh box for whichever experiment the row now points at —
+                // otherwise a cell can keep stale text after switching tabs
+                // (e.g. one that was edited and then cleared).
                 return f.type === "image" ? (
                   <ImageFieldRow
-                    key={f.key}
+                    key={`${f.key}:${row.mode}`}
                     field={f}
                     value={row.value}
                     paperId={paper.id}
@@ -693,7 +701,7 @@ function SingleView({
                   />
                 ) : (
                   <FieldRow
-                    key={f.key}
+                    key={`${f.key}:${row.mode}`}
                     field={f}
                     value={row.value}
                     onChange={row.commit}
