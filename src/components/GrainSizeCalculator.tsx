@@ -55,6 +55,13 @@ export function GrainSizeCalculator({
 
   const [color, setColor] = useState("#ff0000");
 
+  // Counting box: a Z×Z square (Z = average grain size × a user factor) to count
+  // grain boundaries attacked inside. `tool` decides what the pointer does.
+  const [tool, setTool] = useState<"line" | "box">("line");
+  const [scaleFactor, setScaleFactor] = useState("5");
+  const [boxCenter, setBoxCenter] = useState<{ x: number; y: number } | null>(null);
+  const [boxCount, setBoxCount] = useState("");
+
   const [scaleMmPerPx, setScaleMmPerPx] = useState<number | null>(null);
   const [scaleLine, setScaleLine] = useState<Line | null>(null);
   const [scaleLength, setScaleLength] = useState("");
@@ -120,6 +127,14 @@ export function GrainSizeCalculator({
   const onPointerDown = (e: React.PointerEvent) => {
     const p = toImage(e);
     if (!p) return;
+    // Box tool: click/drag positions the counting square instead of drawing.
+    if (tool === "box") {
+      if (boxSidePx == null) return;
+      drawing.current = true;
+      setBoxCenter(clampBoxCenter(p, boxSidePx));
+      boxRef.current?.setPointerCapture(e.pointerId);
+      return;
+    }
     drawing.current = true;
     setDraft({ x1: p.x, y1: p.y, x2: p.x, y2: p.y });
     setDraftCount("");
@@ -129,6 +144,10 @@ export function GrainSizeCalculator({
     if (!drawing.current) return;
     const p = toImage(e);
     if (!p) return;
+    if (tool === "box") {
+      if (boxSidePx != null) setBoxCenter(clampBoxCenter(p, boxSidePx));
+      return;
+    }
     setDraft((d) => {
       if (!d) return d;
       // In the measure phase, snap test lines to horizontal or vertical.
@@ -173,6 +192,21 @@ export function GrainSizeCalculator({
   const lbarMm = totalN > 0 ? totalLen / totalN : null;
   const lbarUm = lbarMm != null ? lbarMm * 1000 : null;
   const g = lbarMm != null && lbarMm > 0 ? -6.6457 * Math.log10(lbarMm) - 3.298 : null;
+
+  // Z = average grain size (µm) × factor; box side in intrinsic pixels.
+  const xFactor = Number(scaleFactor);
+  const zUm = lbarUm != null && Number.isFinite(xFactor) && xFactor > 0 ? lbarUm * xFactor : null;
+  const boxSidePx = zUm != null && scaleMmPerPx ? zUm / 1000 / scaleMmPerPx : null;
+  // Keep the box's centre so the square stays inside the image.
+  const clampBoxCenter = (p: { x: number; y: number }, side: number) => {
+    if (!natural) return p;
+    const hx = Math.min(side, natural.w) / 2;
+    const hy = Math.min(side, natural.h) / 2;
+    return {
+      x: Math.min(Math.max(p.x, hx), natural.w - hx),
+      y: Math.min(Math.max(p.y, hy), natural.h - hy),
+    };
+  };
 
   // The user copies just the average grain (intercept) size in microns — a bare
   // number, no unit.
@@ -293,6 +327,19 @@ export function GrainSizeCalculator({
                     <g key={t.id}>{strokeFor(t.line)}</g>
                   ))}
                   {draft && strokeFor(draft, "6 4")}
+                  {boxCenter && boxSidePx != null && (
+                    <rect
+                      x={boxCenter.x - boxSidePx / 2}
+                      y={boxCenter.y - boxSidePx / 2}
+                      width={boxSidePx}
+                      height={boxSidePx}
+                      stroke={color}
+                      strokeWidth={2}
+                      fill={color}
+                      fillOpacity={0.08}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                  )}
                 </svg>
               )}
             </div>
@@ -429,6 +476,76 @@ export function GrainSizeCalculator({
                     </li>
                   ))}
                 </ul>
+              )}
+            </section>
+
+            {/* Step 3: grain-boundary counting box */}
+            <section className={measuring ? "" : "opacity-40 pointer-events-none"}>
+              <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-1">
+                3 · Grain-boundary box
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                Draw a Z×Z box (Z = average grain size × your factor) and count the grain boundaries
+                attacked inside it.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">Factor ×</label>
+                <input
+                  value={scaleFactor}
+                  onChange={(e) => setScaleFactor(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="e.g. 5"
+                  className="w-16 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-0.5 font-mono"
+                />
+                <button
+                  onClick={() => {
+                    if (boxSidePx == null) return;
+                    setTool((t) => (t === "box" ? "line" : "box"));
+                    if (boxCenter == null && natural)
+                      setBoxCenter({ x: natural.w / 2, y: natural.h / 2 });
+                  }}
+                  disabled={boxSidePx == null}
+                  className={
+                    "ml-auto rounded px-2.5 py-1 text-xs disabled:opacity-40 " +
+                    (tool === "box" ? "bg-copper text-white" : "bg-primary text-primary-foreground")
+                  }
+                  title={boxSidePx == null ? "Add at least one intercept test first" : undefined}
+                >
+                  {tool === "box" ? "Placing…" : boxCenter ? "Move box" : "Place box"}
+                </button>
+              </div>
+              {zUm != null ? (
+                <p className="mt-1 text-[11px] text-muted-foreground font-mono">
+                  Z = {fmt(zUm, 2)} µm ({fmt(boxSidePx ?? 0, 0)} px per side)
+                </p>
+              ) : (
+                measuring && (
+                  <p className="mt-1 text-[11px] text-muted-foreground italic">
+                    Add at least one intercept test to size the box.
+                  </p>
+                )
+              )}
+              {boxCenter && (
+                <div className="mt-2 flex items-center gap-2">
+                  <label className="text-xs text-muted-foreground">Boundaries attacked</label>
+                  <input
+                    value={boxCount}
+                    onChange={(e) => setBoxCount(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="count"
+                    className="w-16 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-0.5 font-mono"
+                  />
+                  <button
+                    onClick={() => {
+                      setBoxCenter(null);
+                      setBoxCount("");
+                      setTool("line");
+                    }}
+                    className="ml-auto text-xs text-copper hover:underline"
+                  >
+                    Clear box
+                  </button>
+                </div>
               )}
             </section>
 
