@@ -59,6 +59,8 @@ export function GrainSizeCalculator({
   // grain boundaries attacked inside. `tool` decides what the pointer does.
   const [tool, setTool] = useState<"line" | "box">("line");
   const [scaleFactor, setScaleFactor] = useState("5");
+  // Optional manual grain size (µm) to size the box from instead of the average.
+  const [manualGrain, setManualGrain] = useState("");
   const [boxCenter, setBoxCenter] = useState<{ x: number; y: number } | null>(null);
   const [boxCount, setBoxCount] = useState("");
 
@@ -193,9 +195,17 @@ export function GrainSizeCalculator({
   const lbarUm = lbarMm != null ? lbarMm * 1000 : null;
   const g = lbarMm != null && lbarMm > 0 ? -6.6457 * Math.log10(lbarMm) - 3.298 : null;
 
-  // Z = average grain size (µm) × factor; box side in intrinsic pixels.
+  // Z = grain size (µm) × factor; box side in intrinsic pixels. The grain size
+  // is the manually-entered value when given, otherwise the measured average.
   const xFactor = Number(scaleFactor);
-  const zUm = lbarUm != null && Number.isFinite(xFactor) && xFactor > 0 ? lbarUm * xFactor : null;
+  const manualGrainUm = Number(manualGrain);
+  const grainForBoxUm =
+    Number.isFinite(manualGrainUm) && manualGrainUm > 0 ? manualGrainUm : lbarUm;
+  const usingManualGrain = grainForBoxUm != null && grainForBoxUm === manualGrainUm;
+  const zUm =
+    grainForBoxUm != null && Number.isFinite(xFactor) && xFactor > 0
+      ? grainForBoxUm * xFactor
+      : null;
   const boxSidePx = zUm != null && scaleMmPerPx ? zUm / 1000 / scaleMmPerPx : null;
   // Keep the box's centre so the square stays inside the image.
   const clampBoxCenter = (p: { x: number; y: number }, side: number) => {
@@ -485,9 +495,20 @@ export function GrainSizeCalculator({
                 3 · Grain-boundary box
               </h3>
               <p className="text-xs text-muted-foreground">
-                Draw a Z×Z box (Z = average grain size × your factor) and count the grain boundaries
+                Draw a Z×Z box (Z = grain size × your factor) and count the grain boundaries
                 attacked inside it.
               </p>
+              <div className="mt-2 flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">Grain size</label>
+                <input
+                  value={manualGrain}
+                  onChange={(e) => setManualGrain(e.target.value)}
+                  inputMode="decimal"
+                  placeholder={lbarUm != null ? `avg ${fmt(lbarUm, 2)}` : "µm"}
+                  className="w-24 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-0.5 font-mono"
+                />
+                <span className="text-[11px] text-muted-foreground">µm</span>
+              </div>
               <div className="mt-2 flex items-center gap-2">
                 <label className="text-xs text-muted-foreground">Factor ×</label>
                 <input
@@ -509,19 +530,24 @@ export function GrainSizeCalculator({
                     "ml-auto rounded px-2.5 py-1 text-xs disabled:opacity-40 " +
                     (tool === "box" ? "bg-copper text-white" : "bg-primary text-primary-foreground")
                   }
-                  title={boxSidePx == null ? "Add at least one intercept test first" : undefined}
+                  title={
+                    boxSidePx == null
+                      ? "Enter a grain size, or add an intercept test to use the average"
+                      : undefined
+                  }
                 >
                   {tool === "box" ? "Placing…" : boxCenter ? "Move box" : "Place box"}
                 </button>
               </div>
               {zUm != null ? (
                 <p className="mt-1 text-[11px] text-muted-foreground font-mono">
-                  Z = {fmt(zUm, 2)} µm ({fmt(boxSidePx ?? 0, 0)} px per side)
+                  Z = {fmt(zUm, 2)} µm ({fmt(boxSidePx ?? 0, 0)} px per side) ·{" "}
+                  {usingManualGrain ? "manual" : "average"} grain size
                 </p>
               ) : (
                 measuring && (
                   <p className="mt-1 text-[11px] text-muted-foreground italic">
-                    Add at least one intercept test to size the box.
+                    Enter a grain size, or add an intercept test to use the average.
                   </p>
                 )
               )}
