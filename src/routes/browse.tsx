@@ -9,7 +9,7 @@ import { PdfDropZone } from "@/components/PdfDropZone";
 import { usePapers, useExperiments } from "@/lib/db";
 import type { Paper } from "@/lib/db";
 import { SnipProvider } from "@/lib/snip";
-import { Columns2, FileText, Table2 } from "lucide-react";
+import { Columns2, FileText, PanelLeftOpen, Table2 } from "lucide-react";
 
 type ViewMode = "data" | "split" | "paper";
 
@@ -28,6 +28,7 @@ interface BrowseUIState {
   userChoseMode: boolean;
   search: string;
   stateFilter: StateFilter;
+  treeCollapsed: boolean;
 }
 function loadBrowseState(): Partial<BrowseUIState> | null {
   if (typeof window === "undefined") return null;
@@ -152,6 +153,7 @@ function BrowsePage() {
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
   const [mode, setMode] = useState<ViewMode>("data");
   const [userChoseMode, setUserChoseMode] = useState(false);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
   // Whether the one-time restore of persisted browse state has run.
   const [restored, setRestored] = useState(false);
 
@@ -182,6 +184,7 @@ function BrowsePage() {
       if (saved.userChoseMode) setUserChoseMode(true);
       if (saved.search) setSearch(saved.search);
       if (saved.stateFilter) setStateFilter(saved.stateFilter);
+      if (saved.treeCollapsed) setTreeCollapsed(true);
     }
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -219,8 +222,18 @@ function BrowsePage() {
       userChoseMode,
       search,
       stateFilter,
+      treeCollapsed,
     });
-  }, [restored, selectedId, selectedExpId, mode, userChoseMode, search, stateFilter]);
+  }, [
+    restored,
+    selectedId,
+    selectedExpId,
+    mode,
+    userChoseMode,
+    search,
+    stateFilter,
+    treeCollapsed,
+  ]);
 
   const selected = papers.find((p) => p.id === selectedId) ?? null;
   const selectedExps = useMemo(
@@ -272,21 +285,35 @@ function BrowsePage() {
   return (
     <SnipProvider>
       <div className="flex max-w-[1600px] mx-auto">
-        <BrowseTree
-          papers={papers}
-          experiments={experiments}
-          selectedPaperId={selectedId}
-          selectedExperimentId={selectedExpId}
-          onSelectPaper={(id) => {
-            setSelectedId(id);
-            setSelectedExpId(null);
-          }}
-          onSelectExperiment={selectExperiment}
-          search={search}
-          setSearch={setSearch}
-          stateFilter={stateFilter}
-          setStateFilter={setStateFilter}
-        />
+        {treeCollapsed ? (
+          <div className="shrink-0 border-r border-rule bg-card/50 h-[calc(100vh-3.5rem)] sticky top-14 flex flex-col items-center py-2">
+            <button
+              onClick={() => setTreeCollapsed(false)}
+              title="Show papers sidebar"
+              aria-label="Show papers sidebar"
+              className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground"
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </button>
+          </div>
+        ) : (
+          <BrowseTree
+            papers={papers}
+            experiments={experiments}
+            selectedPaperId={selectedId}
+            selectedExperimentId={selectedExpId}
+            onSelectPaper={(id) => {
+              setSelectedId(id);
+              setSelectedExpId(null);
+            }}
+            onSelectExperiment={selectExperiment}
+            search={search}
+            setSearch={setSearch}
+            stateFilter={stateFilter}
+            setStateFilter={setStateFilter}
+            onCollapse={() => setTreeCollapsed(true)}
+          />
+        )}
         <section className="flex-1 min-w-0 flex flex-col h-[calc(100vh-3.5rem)]">
           {selected ? (
             <>

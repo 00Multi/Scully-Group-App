@@ -32,7 +32,7 @@ import {
   Copy,
   GripVertical,
   Layers,
-  ListChecks,
+  MoreHorizontal,
   Plus,
   Rows3,
   Trash2,
@@ -125,66 +125,32 @@ function ExperimentSelect({
   );
 }
 
-// ---- Per-experiment multi-select of the "variables" studied ----
-// Lets the user tag each experiment with which data points it varied/studied,
-// picked from the full schema. Surfaced as a distribution on the Trends page.
-function VariablesSelect({
-  fields,
-  selected,
-  onToggle,
+// ---- Mass status menu: apply N/A or Missing to the blank cells in scope ----
+// Used per-category in the single view and per-data-point in the compare view.
+// It only ever affects cells that don't already have a value entered.
+function MassStatusMenu({
+  label,
+  onApply,
 }: {
-  fields: FieldDef[];
-  selected: string[];
-  onToggle: (key: string) => void;
+  label: string;
+  onApply: (state: FieldState) => void;
 }) {
-  const set = new Set(selected);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="focus:outline-none"
-        title="Variables studied in this experiment"
+        className="focus:outline-none text-muted-foreground hover:text-foreground shrink-0"
+        title={label}
       >
-        <span className="inline-flex items-center gap-1 rounded border border-rule px-2 py-1 text-xs hover:bg-accent">
-          <ListChecks className="h-3.5 w-3.5 text-copper" />
-          Variables
-          {selected.length > 0 && (
-            <span className="rounded-full bg-copper/15 text-copper px-1.5 text-[10px] font-mono">
-              {selected.length}
-            </span>
-          )}
-          <ChevronDown className="h-3 w-3 text-muted-foreground" />
-        </span>
+        <MoreHorizontal className="h-3.5 w-3.5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-72 overflow-auto">
-        {fields.map((f) => {
-          const on = set.has(f.key);
-          return (
-            <DropdownMenuItem
-              key={f.key}
-              // Keep the menu open while toggling multiple variables.
-              onSelect={(ev) => {
-                ev.preventDefault();
-                onToggle(f.key);
-              }}
-              className="gap-2"
-            >
-              <span
-                className={
-                  "inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm border " +
-                  (on ? "bg-copper border-copper text-white" : "border-rule")
-                }
-              >
-                {on && <Check className="h-3 w-3" />}
-              </span>
-              <span className="truncate max-w-[16rem]">{f.label}</span>
-            </DropdownMenuItem>
-          );
-        })}
-        {fields.length === 0 && (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground italic">
-            No data points yet.
-          </div>
-        )}
+      <DropdownMenuContent align="end">
+        <div className="px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+          {label}
+        </div>
+        <DropdownMenuItem onSelect={() => onApply("na")}>Set blanks to N/A</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onApply("missing")}>
+          Set blanks to Missing
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -531,16 +497,36 @@ export function PaperExperiments({
     if (next.join("|") === order.join("|")) return;
     persistOrder(next);
   };
-  // Move an experiment to the far-left column (used by Compare-view tab clicks).
-  const moveToFront = (id: string) => {
-    if (order[0] === id) return;
-    persistOrder([id, ...order.filter((x) => x !== id)]);
+  // Compare-view tab clicks scroll that experiment's column to the far left
+  // (without changing the order). The nonce lets a repeat click re-scroll.
+  const [scrollToExp, setScrollToExp] = useState<{ id: string; nonce: number }>({
+    id: "",
+    nonce: 0,
+  });
+  const requestScrollToExp = (id: string) => setScrollToExp((s) => ({ id, nonce: s.nonce + 1 }));
+
+  // Per-experiment manual "reviewed" checkmark.
+  const setChecked = (id: string, checked: boolean) => updateExp.mutate({ id, patch: { checked } });
+
+  // A cell "has info" once the user has entered a value — mass status actions
+  // never overwrite those.
+  const hasInfo = (v: FieldValue) => v.value != null && String(v.value).trim() !== "";
+
+  // Single view: set every blank data point in a category (group) to N/A or
+  // Missing for the current target — the focused experiment, or every
+  // experiment when the "All" tab is active. Filled cells are left untouched.
+  const markGroupBlanks = (groupId: string, state: FieldState) => {
+    const fields = fieldsByGroup[groupId] ?? [];
+    const targets = baseIsExp ? [base] : experiments.map((e) => e.id);
+    for (const f of fields) {
+      for (const id of targets) {
+        if (!hasInfo(valueOf(id, f.key))) setField(id, f.key, { value: null, state });
+      }
+    }
   };
 
-  // Per-experiment manual "reviewed" checkmark and the "variables studied" tags.
-  const setChecked = (id: string, checked: boolean) => updateExp.mutate({ id, patch: { checked } });
   // "Check all done" — mark every experiment reviewed, or clear them all if
-  // they already are.
+  // they already are. (setChecked is defined above.)
   const allChecked = experiments.length > 0 && experiments.every((e) => e.checked);
   const toggleCheckAll = () => {
     const next = !allChecked;
@@ -548,12 +534,13 @@ export function PaperExperiments({
       if (e.checked !== next) setChecked(e.id, next);
     });
   };
-  const toggleVariable = (id: string, key: string) => {
-    const e = experiments.find((x) => x.id === id);
-    if (!e) return;
-    const cur = e.variables ?? [];
-    const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
-    updateExp.mutate({ id, patch: { variables: next } });
+
+  // Compare view: for one data point, set its status across every experiment
+  // whose cell isn't already filled in. Filled cells are left untouched.
+  const markRowBlanks = (key: string, state: FieldState) => {
+    for (const e of experiments) {
+      if (!hasInfo(valueOf(e.id, key))) setField(e.id, key, { value: null, state });
+    }
   };
 
   if (experiments.length === 0) {
@@ -624,9 +611,9 @@ export function PaperExperiments({
                   onDragEnd={endDrag}
                   onClick={() => {
                     onActiveExp(e.id);
-                    // In Compare view, clicking a tab pulls that experiment to the
-                    // far-left column.
-                    if (mode === "multi") moveToFront(e.id);
+                    // In Compare view, clicking a tab scrolls that experiment's
+                    // column to the far left (order is preserved).
+                    if (mode === "multi") requestScrollToExp(e.id);
                   }}
                   className={
                     "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs transition-[background-color,color,opacity] max-w-[14rem] cursor-grab active:cursor-grabbing " +
@@ -636,7 +623,7 @@ export function PaperExperiments({
                     (draggingId === id ? " opacity-40" : "")
                   }
                   style={on ? { backgroundColor: expColor(i) } : undefined}
-                  title={`${expName(e, i)} — click to ${mode === "multi" ? "move to front" : "focus"}, drag to reorder`}
+                  title={`${expName(e, i)} — click to ${mode === "multi" ? "scroll to front" : "focus"}, drag to reorder`}
                 >
                   <GripVertical className="h-3 w-3 opacity-50" />
                   <Dot i={i} className={on ? "ring-1 ring-white/70" : ""} />
@@ -743,11 +730,7 @@ export function PaperExperiments({
             const e = experiments[baseIndex];
             if (e) setChecked(e.id, !e.checked);
           }}
-          variables={experiments[baseIndex]?.variables ?? []}
-          onToggleVariable={(key) => {
-            const e = experiments[baseIndex];
-            if (e) toggleVariable(e.id, key);
-          }}
+          onMarkGroup={markGroupBlanks}
           addField={addField}
           deleteField={deleteField}
         />
@@ -763,6 +746,8 @@ export function PaperExperiments({
           onRemove={remove}
           onRename={(id, label) => updateExp.mutate({ id, patch: { label } })}
           onToggleChecked={setChecked}
+          onMarkRow={markRowBlanks}
+          scrollToExp={scrollToExp}
         />
       )}
     </div>
@@ -785,8 +770,7 @@ function SingleView({
   onDeleteExp,
   checked,
   onToggleChecked,
-  variables,
-  onToggleVariable,
+  onMarkGroup,
   addField,
   deleteField,
 }: {
@@ -810,12 +794,10 @@ function SingleView({
   onDeleteExp: () => void;
   checked: boolean;
   onToggleChecked: () => void;
-  variables: string[];
-  onToggleVariable: (key: string) => void;
+  onMarkGroup: (groupId: string, state: FieldState) => void;
   addField: (groupId: string) => void;
   deleteField: (key: string) => void;
 }) {
-  const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   const baseIsExp = base !== ALL;
   const active = experiments[baseIndex];
   const [label, setLabel] = useState(active?.label ?? "");
@@ -838,7 +820,6 @@ function SingleView({
             placeholder={`Experiment ${baseIndex + 1}`}
             className="flex-1 bg-transparent text-lg font-serif italic focus:outline-none min-w-0"
           />
-          <VariablesSelect fields={allFields} selected={variables} onToggle={onToggleVariable} />
           <button
             onClick={onToggleChecked}
             className={
@@ -881,9 +862,15 @@ function SingleView({
       <div className="grid grid-cols-1 @4xl:grid-cols-2 gap-x-6 gap-y-0 px-5 py-3">
         {orderedGroups.map((group) => (
           <section key={group.id} className="min-w-0">
-            <h4 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mt-2 mb-1">
-              {group.label}
-            </h4>
+            <div className="mt-2 mb-1 flex items-center justify-between gap-2">
+              <h4 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+                {group.label}
+              </h4>
+              <MassStatusMenu
+                label="Mark blanks in this category"
+                onApply={(state) => onMarkGroup(group.id, state)}
+              />
+            </div>
             <div>
               {(fieldsByGroup[group.id] ?? []).map((f) => {
                 const row = resolveRow(f.key);
@@ -965,6 +952,8 @@ function MultiView({
   onRemove,
   onRename,
   onToggleChecked,
+  onMarkRow,
+  scrollToExp,
 }: {
   experiments: Experiment[];
   orderedGroups: { id: string; label: string }[];
@@ -976,10 +965,29 @@ function MultiView({
   onRemove: (e: Experiment) => void;
   onRename: (id: string, label: string) => void;
   onToggleChecked: (id: string, checked: boolean) => void;
+  onMarkRow: (key: string, state: FieldState) => void;
+  scrollToExp: { id: string; nonce: number };
 }) {
   const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const colRefs = useRef<Record<string, HTMLTableCellElement | null>>({});
+  const stickyRef = useRef<HTMLTableCellElement>(null);
+
+  // Scroll the requested experiment's column to the far left of the view,
+  // just past the sticky "Data point" column. Order is unchanged.
+  useEffect(() => {
+    const container = scrollRef.current;
+    const col = colRefs.current[scrollToExp.id];
+    if (!container || !col) return;
+    const sticky = stickyRef.current?.offsetWidth ?? 0;
+    container.scrollTo({ left: Math.max(0, col.offsetLeft - sticky), behavior: "smooth" });
+  }, [scrollToExp.nonce, scrollToExp.id]);
+
   return (
-    <div className="rounded-b-lg border border-t-0 border-rule bg-card overflow-x-auto">
+    <div
+      ref={scrollRef}
+      className="rounded-b-lg border border-t-0 border-rule bg-card overflow-x-auto"
+    >
       {/* Datalists for option fields (shared by all cells). */}
       {allFields
         .filter((f) => f.options?.length)
@@ -994,7 +1002,10 @@ function MultiView({
       <table className="w-full border-collapse text-sm">
         <thead>
           <tr>
-            <th className="sticky left-0 z-10 bg-card text-left align-bottom px-4 py-2 min-w-[10rem] border-b border-rule">
+            <th
+              ref={stickyRef}
+              className="sticky left-0 z-10 bg-card text-left align-bottom px-4 py-2 min-w-[10rem] border-b border-rule"
+            >
               <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
                 Data point
               </span>
@@ -1002,6 +1013,9 @@ function MultiView({
             {experiments.map((e, i) => (
               <th
                 key={e.id}
+                ref={(el) => {
+                  colRefs.current[e.id] = el;
+                }}
                 className="text-left align-bottom px-3 py-2 min-w-[12rem] border-b border-rule"
                 style={{ boxShadow: `inset 0 3px 0 ${expColor(i)}` }}
               >
@@ -1058,6 +1072,7 @@ function MultiView({
               experiments={experiments}
               valueOf={valueOf}
               setField={setField}
+              onMarkRow={onMarkRow}
             />
           ))}
         </tbody>
@@ -1100,12 +1115,14 @@ function ExpGroupRows({
   experiments,
   valueOf,
   setField,
+  onMarkRow,
 }: {
   group: { id: string; label: string };
   fields: FieldDef[];
   experiments: Experiment[];
   valueOf: (expId: string, key: string) => FieldValue;
   setField: (expId: string, key: string, v: FieldValue) => void;
+  onMarkRow: (key: string, state: FieldState) => void;
 }) {
   if (fields.length === 0) return null;
   return (
@@ -1121,14 +1138,20 @@ function ExpGroupRows({
       {fields.map((f) => (
         <tr key={f.key} className="hover:bg-accent/30">
           <td className="sticky left-0 z-10 bg-card px-4 py-1.5 align-top border-b border-rule/60">
-            <FieldTooltip field={f}>
-              <span className="text-sm text-ink-muted cursor-help select-none break-words">
-                {f.label}
-                {f.unit && (
-                  <span className="ml-1 text-xs text-muted-foreground font-mono">({f.unit})</span>
-                )}
-              </span>
-            </FieldTooltip>
+            <div className="flex items-start justify-between gap-1.5">
+              <FieldTooltip field={f}>
+                <span className="text-sm text-ink-muted cursor-help select-none break-words">
+                  {f.label}
+                  {f.unit && (
+                    <span className="ml-1 text-xs text-muted-foreground font-mono">({f.unit})</span>
+                  )}
+                </span>
+              </FieldTooltip>
+              <MassStatusMenu
+                label="Mark blank cells in this row"
+                onApply={(state) => onMarkRow(f.key, state)}
+              />
+            </div>
           </td>
           {experiments.map((e) => (
             <td key={e.id} className="px-3 py-1.5 align-top border-b border-rule/60">

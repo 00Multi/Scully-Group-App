@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownWideNarrow, Check, ChevronRight, Plus, Search } from "lucide-react";
+import {
+  ArrowDownWideNarrow,
+  Check,
+  ChevronRight,
+  PanelLeftClose,
+  Plus,
+  Search,
+} from "lucide-react";
 import type { Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
@@ -53,6 +60,7 @@ interface Props {
   setSearch: (v: string) => void;
   stateFilter: StateFilter;
   setStateFilter: (v: StateFilter) => void;
+  onCollapse?: () => void;
 }
 
 function alloyTypeOf(e: Experiment): string {
@@ -91,6 +99,7 @@ export function BrowseTree({
   setSearch,
   stateFilter,
   setStateFilter,
+  onCollapse,
 }: Props) {
   const [openPapers, setOpenPapers] = useState<Record<string, boolean>>({});
   const [sortBy, setSortBy] = useState<SortMode>("default");
@@ -252,12 +261,24 @@ export function BrowseTree({
       </div>
 
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-rule/60">
-        <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
-          {visiblePapers.length} paper{visiblePapers.length === 1 ? "" : "s"}
-        </span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          {onCollapse && (
+            <button
+              onClick={onCollapse}
+              title="Hide papers sidebar"
+              aria-label="Hide papers sidebar"
+              className="text-muted-foreground hover:text-foreground shrink-0"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+          )}
+          <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono truncate">
+            {visiblePapers.length} paper{visiblePapers.length === 1 ? "" : "s"}
+          </span>
+        </div>
         <button
           onClick={() => createPaper.mutate({ category_id: null })}
-          className="inline-flex items-center gap-1 text-xs text-copper hover:underline"
+          className="inline-flex items-center gap-1 text-xs text-copper hover:underline shrink-0"
         >
           <Plus className="h-3 w-3" /> New paper
         </button>

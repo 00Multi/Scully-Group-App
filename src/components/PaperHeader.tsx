@@ -8,8 +8,10 @@ import {
   useRemovePaperPdf,
 } from "@/lib/db";
 import { fetchCrossref, isLikelyDoi } from "@/lib/crossref";
+import { useFieldDefs } from "@/lib/settings";
 import { AutoTextarea } from "./AutoTextarea";
 import { InstitutionEditor } from "./InstitutionEditor";
+import { VariablesSelect } from "./VariablesSelect";
 import { FileUp, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 
 type Draft = {
@@ -29,7 +31,15 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
   const createExp = useCreateExperiment();
   const uploadPdf = useUploadPaperPdf();
   const removePdf = useRemovePaperPdf();
+  const fieldDefs = useFieldDefs();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Variables studied are a paper-level tag set. Toggle one on/off and persist.
+  const toggleVariable = (key: string) => {
+    const cur = paper.variables ?? [];
+    const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+    update.mutate({ id: paper.id, patch: { variables: next } });
+  };
 
   const draft = (p: Paper): Draft => ({
     author: p.author,
@@ -335,17 +345,29 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           />
         </div>
         <div className="md:col-span-2">
-          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
-            Notes
-          </label>
-          <AutoTextarea
-            value={state.notes}
-            onChange={(e) => setState({ ...state, notes: e.target.value })}
-            onBlur={() => commit({ notes: state.notes })}
-            rows={2}
-            placeholder="Free-form notes (e.g. check full text, paywalled)"
-            className="w-full mt-1 bg-transparent border border-input rounded p-2 focus:border-primary focus:outline-none text-sm"
-          />
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+              Notes
+            </label>
+          </div>
+          <div className="mt-1 flex items-start gap-2">
+            <AutoTextarea
+              value={state.notes}
+              onChange={(e) => setState({ ...state, notes: e.target.value })}
+              onBlur={() => commit({ notes: state.notes })}
+              rows={2}
+              placeholder="Free-form notes (e.g. check full text, paywalled)"
+              className="flex-1 min-w-0 bg-transparent border border-input rounded p-2 focus:border-primary focus:outline-none text-sm"
+            />
+            {/* Variables studied — a paper-level tag set, charted on Trends. */}
+            <div className="shrink-0 pt-0.5">
+              <VariablesSelect
+                fields={fieldDefs}
+                selected={paper.variables ?? []}
+                onToggle={toggleVariable}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </div>
