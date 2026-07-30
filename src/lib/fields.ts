@@ -122,15 +122,6 @@ export const DEFAULT_FIELDS: FieldDef[] = [
     definition:
       "Micrograph or figure showing the corrosion attack for this experiment. Capture a region from the PDF with the snip tool, or upload an image.",
   },
-  {
-    key: "corrosion_image_view",
-    label: "Image view",
-    group: "physical",
-    type: "select",
-    definition:
-      "Whether the corrosion image shows the sample surface or a cross section through it.",
-    options: ["Surface", "Cross section"],
-  },
   // Chemical
   {
     key: "salt",
@@ -249,30 +240,6 @@ export const DEFAULT_SCHEMA: Schema = {
   groups: DEFAULT_GROUPS,
   fields: DEFAULT_FIELDS,
 };
-
-// Built-in fields introduced after the initial schema. Ensure they exist in any
-// already-persisted schema (local cache or the shared remote row) so existing
-// databases pick them up without a manual migration. Idempotent — each field is
-// only inserted when its key is absent, positioned next to a sibling field.
-const BUILTIN_BACKFILL: { field: FieldDef; after: string }[] = [
-  {
-    field: DEFAULT_FIELDS.find((f) => f.key === "corrosion_image_view")!,
-    after: "corrosion_image",
-  },
-];
-
-export function withBuiltinFields(schema: Schema): Schema {
-  let fields = schema.fields;
-  for (const { field, after } of BUILTIN_BACKFILL) {
-    if (fields.some((f) => f.key === field.key)) continue;
-    const clone: FieldDef = { ...field, options: field.options ? [...field.options] : undefined };
-    const at = fields.findIndex((f) => f.key === after);
-    fields = fields === schema.fields ? [...fields] : fields;
-    if (at >= 0) fields.splice(at + 1, 0, clone);
-    else fields.push(clone);
-  }
-  return fields === schema.fields ? schema : { ...schema, fields };
-}
 
 // Backwards-compatible aliases. Prefer the live schema via settings hooks.
 export const FIELD_DEFS = DEFAULT_FIELDS;
