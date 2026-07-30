@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Ruler, Trash2, X } from "lucide-react";
+import { Check, Copy, Maximize2, Ruler, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
 
 // ASTM E112 grain-size calculator using the intercept method.
 //
@@ -11,6 +11,10 @@ import { Check, Copy, Ruler, Trash2, X } from "lucide-react";
 //       L̄ = Σ(line length, mm) / Σ(N)
 //     and the ASTM grain-size number (Eq. 5 as supplied) is
 //       G = −6.6457·log₁₀(L̄) − 3.298,  with L̄ in mm.
+//
+// All geometry is stored in intrinsic image pixels and mapped from pointer
+// events through the element's live bounding rect, so zooming (a display-only
+// transform) never changes any measurement.
 
 type Line = { x1: number; y1: number; x2: number; y2: number };
 type Unit = "µm" | "mm";
@@ -21,12 +25,16 @@ interface Test {
   count: number;
 }
 
+const COLORS = ["#ff0000", "#ffd400", "#00e000", "#00e5ff", "#ff00ff", "#ffffff", "#000000"];
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 8;
+
 const lineLen = (l: Line) => Math.hypot(l.x2 - l.x1, l.y2 - l.y1);
 const toMm = (value: number, unit: Unit) => (unit === "µm" ? value / 1000 : value);
+const clampZoom = (z: number) => Math.min(Math.max(z, ZOOM_MIN), ZOOM_MAX);
 const fmt = (n: number, d = 3) => {
   if (!Number.isFinite(n)) return "—";
-  const r = Number(n.toFixed(d));
-  return String(r);
+  return String(Number(n.toFixed(d)));
 };
 
 export function GrainSizeCalculator({
@@ -38,8 +46,14 @@ export function GrainSizeCalculator({
   title?: string;
   onClose: () => void;
 }) {
+  const paneRef = useRef<HTMLDivElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+
+  const [zoom, setZoom] = useState(1);
+  const [fitZoom, setFitZoom] = useState(1);
+
+  const [color, setColor] = useState("#ff0000");
 
   const [scaleMmPerPx, setScaleMmPerPx] = useState<number | null>(null);
   const [scaleLine, setScaleLine] = useState<Line | null>(null);
@@ -62,7 +76,35 @@ export function GrainSizeCalculator({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Map a pointer event to intrinsic image pixels.
+  // Ctrl/⌘ + wheel zooms; a plain wheel still scrolls the pane. Attached as a
+  // non-passive listener so preventDefault actually blocks browser zoom.
+  useEffect(() => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    const handler = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      setZoom((z) => clampZoom(z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+    };
+    pane.addEventListener("wheel", handler, { passive: false });
+    return () => pane.removeEventListener("wheel", handler);
+  }, []);
+
+  // Fit the image to the pane on load.
+  const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const w = e.currentTarget.naturalWidth;
+    const h = e.currentTarget.naturalHeight;
+    setNatural({ w, h });
+    const pane = paneRef.current;
+    const availW = (pane?.clientWidth ?? 800) - 32;
+    const availH = (pane?.clientHeight ?? 500) - 32;
+    const fit = clampZoom(Math.min(availW / w, availH / h, 1));
+    setFitZoom(fit);
+    setZoom(fit);
+  };
+
+  // Map a pointer event to intrinsic image pixels via the live bounding rect,
+  // so the current zoom is already accounted for.
   const toImage = (e: React.PointerEvent) => {
     const box = boxRef.current;
     if (!box || !natural) return null;
@@ -129,13 +171,15 @@ export function GrainSizeCalculator({
   const totalLen = tests.reduce((s, t) => s + t.lengthMm, 0);
   const totalN = tests.reduce((s, t) => s + t.count, 0);
   const lbarMm = totalN > 0 ? totalLen / totalN : null;
+  const lbarUm = lbarMm != null ? lbarMm * 1000 : null;
   const g = lbarMm != null && lbarMm > 0 ? -6.6457 * Math.log10(lbarMm) - 3.298 : null;
 
+  // The user copies just the average grain (intercept) size in microns — a bare
+  // number, no unit.
   const copyResult = async () => {
-    if (g == null || lbarMm == null) return;
-    const text = `ASTM E112 grain size G = ${fmt(g, 2)} (mean intercept length L̄ = ${fmt(lbarMm * 1000, 2)} µm, ${tests.length} test line${tests.length === 1 ? "" : "s"})`;
+    if (lbarUm == null) return;
     try {
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(fmt(lbarUm, 2));
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -145,12 +189,29 @@ export function GrainSizeCalculator({
 
   const draftLenMm = draft && scaleMmPerPx != null ? lineLen(draft) * scaleMmPerPx : null;
 
+  const zoomBy = (factor: number) => setZoom((z) => clampZoom(z * factor));
+
+  const displayW = natural ? natural.w * zoom : undefined;
+
+  const strokeFor = (l: Line, dash?: string) => (
+    <line
+      x1={l.x1}
+      y1={l.y1}
+      x2={l.x2}
+      y2={l.y2}
+      stroke={color}
+      strokeWidth={2}
+      strokeDasharray={dash}
+      vectorEffect="non-scaling-stroke"
+    />
+  );
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-2 sm:p-4"
       onPointerDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-rule bg-card shadow-xl">
+      <div className="flex max-h-[96vh] w-full max-w-[92rem] flex-col overflow-hidden rounded-lg border border-rule bg-card shadow-xl">
         <header className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5">
           <div className="flex items-center gap-2 min-w-0">
             <Ruler className="h-4 w-4 text-copper shrink-0" />
@@ -158,78 +219,80 @@ export function GrainSizeCalculator({
               Grain size — intercept method{title ? ` · ${title}` : ""}
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1 rounded hover:bg-accent text-muted-foreground"
-            aria-label="Close"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Zoom controls (visual aid only — measurements are unaffected). */}
+            <button
+              onClick={() => zoomBy(1 / 1.25)}
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
+              title="Zoom out"
+              aria-label="Zoom out"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </button>
+            <span className="w-12 text-center tabular-nums text-xs text-muted-foreground">
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={() => zoomBy(1.25)}
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
+              title="Zoom in"
+              aria-label="Zoom in"
+            >
+              <ZoomIn className="h-4 w-4" />
+            </button>
+            <button
+              onClick={() => setZoom(fitZoom)}
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
+              title="Fit to window"
+              aria-label="Fit to window"
+            >
+              <Maximize2 className="h-4 w-4" />
+            </button>
+            <span className="mx-1 h-4 w-px bg-rule" />
+            <button
+              onClick={onClose}
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </header>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-[1fr_20rem]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-[1fr_21rem]">
           {/* Image + drawing surface */}
-          <div className="min-h-0 overflow-auto bg-muted/30 p-3 flex items-start justify-center">
+          <div
+            ref={paneRef}
+            className="min-h-0 overflow-auto bg-muted/30 p-4 flex items-start"
+            style={{ justifyContent: "safe center" }}
+          >
             <div
               ref={boxRef}
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
-              className="relative inline-block select-none touch-none cursor-crosshair"
+              className="relative inline-block select-none touch-none cursor-crosshair shrink-0"
+              style={displayW ? { width: displayW } : undefined}
             >
               <img
                 src={imageUrl}
                 alt={title || "Micrograph"}
                 draggable={false}
-                onLoad={(e) =>
-                  setNatural({
-                    w: e.currentTarget.naturalWidth,
-                    h: e.currentTarget.naturalHeight,
-                  })
-                }
-                className="block max-h-[70vh] max-w-full w-auto bg-white"
+                onLoad={onImageLoad}
+                style={displayW ? { width: displayW } : { maxWidth: "100%" }}
+                className="block bg-white"
               />
               {natural && (
                 <svg
-                  className="absolute inset-0 h-full w-full"
+                  className="absolute inset-0 h-full w-full pointer-events-none"
                   viewBox={`0 0 ${natural.w} ${natural.h}`}
                   preserveAspectRatio="none"
                 >
-                  {scaleLine && (
-                    <line
-                      x1={scaleLine.x1}
-                      y1={scaleLine.y1}
-                      x2={scaleLine.x2}
-                      y2={scaleLine.y2}
-                      stroke="#b87333"
-                      strokeWidth={2}
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  )}
+                  {scaleLine && strokeFor(scaleLine, "5 3")}
                   {tests.map((t) => (
-                    <line
-                      key={t.id}
-                      x1={t.line.x1}
-                      y1={t.line.y1}
-                      x2={t.line.x2}
-                      y2={t.line.y2}
-                      stroke="#6b8f71"
-                      strokeWidth={2}
-                      vectorEffect="non-scaling-stroke"
-                    />
+                    <g key={t.id}>{strokeFor(t.line)}</g>
                   ))}
-                  {draft && (
-                    <line
-                      x1={draft.x1}
-                      y1={draft.y1}
-                      x2={draft.x2}
-                      y2={draft.y2}
-                      stroke={measuring ? "#6b8f71" : "#b87333"}
-                      strokeWidth={2}
-                      strokeDasharray="6 4"
-                      vectorEffect="non-scaling-stroke"
-                    />
-                  )}
+                  {draft && strokeFor(draft, "6 4")}
                 </svg>
               )}
             </div>
@@ -237,6 +300,34 @@ export function GrainSizeCalculator({
 
           {/* Controls */}
           <div className="min-h-0 overflow-y-auto border-t border-rule md:border-l md:border-t-0 p-4 space-y-4 text-sm">
+            {/* Line colour */}
+            <section>
+              <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-1">
+                Line colour
+              </h3>
+              <div className="flex items-center gap-1.5">
+                {COLORS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setColor(c)}
+                    aria-label={`Use ${c}`}
+                    className={
+                      "h-5 w-5 rounded-full border transition-transform " +
+                      (color.toLowerCase() === c ? "ring-2 ring-copper scale-110" : "border-rule")
+                    }
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+                <input
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  aria-label="Custom line colour"
+                  className="h-5 w-6 cursor-pointer rounded border border-rule bg-transparent p-0"
+                />
+              </div>
+            </section>
+
             {/* Step 1: calibrate */}
             <section>
               <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono mb-1">
@@ -260,6 +351,7 @@ export function GrainSizeCalculator({
                     <input
                       value={scaleLength}
                       onChange={(e) => setScaleLength(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && setScale()}
                       inputMode="decimal"
                       placeholder="length"
                       className="w-20 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-0.5 font-mono"
@@ -298,6 +390,7 @@ export function GrainSizeCalculator({
                 <input
                   value={draftCount}
                   onChange={(e) => setDraftCount(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addTest()}
                   inputMode="decimal"
                   placeholder="e.g. 12.5"
                   className="w-20 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-0.5 font-mono"
@@ -345,18 +438,20 @@ export function GrainSizeCalculator({
                 Result
               </h3>
               <div className="space-y-1 font-mono text-xs">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Mean intercept L̄</span>
-                  <span>{lbarMm != null ? `${fmt(lbarMm * 1000, 2)} µm` : "—"}</span>
+                <div className="flex items-end justify-between">
+                  <span className="text-muted-foreground text-xs">Avg grain size L̄</span>
+                  <span className="text-base font-semibold">
+                    {lbarUm != null ? `${fmt(lbarUm, 2)} µm` : "—"}
+                  </span>
                 </div>
-                <div className="flex justify-between text-base">
-                  <span className="text-muted-foreground text-xs self-end">ASTM G</span>
-                  <span className="font-semibold">{g != null ? fmt(g, 2) : "—"}</span>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">ASTM G</span>
+                  <span>{g != null ? fmt(g, 2) : "—"}</span>
                 </div>
               </div>
               <button
                 onClick={copyResult}
-                disabled={g == null}
+                disabled={lbarUm == null}
                 className="mt-2 w-full inline-flex items-center justify-center gap-1 rounded border border-rule px-2 py-1 text-xs hover:bg-accent disabled:opacity-40"
               >
                 {copied ? (
@@ -364,7 +459,7 @@ export function GrainSizeCalculator({
                 ) : (
                   <Copy className="h-3.5 w-3.5" />
                 )}
-                {copied ? "Copied" : "Copy average"}
+                {copied ? "Copied" : "Copy average (µm)"}
               </button>
             </section>
 

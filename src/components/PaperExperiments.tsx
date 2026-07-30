@@ -16,6 +16,7 @@ import { FieldRow } from "./FieldRow";
 import { ImageFieldRow } from "./ImageFieldRow";
 import { FieldTooltip } from "./FieldTooltip";
 import { StateBadge } from "./StateBadge";
+import { GrainSizeCalculator } from "./GrainSizeCalculator";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -191,6 +192,7 @@ function MultiCell({
   onChange: (v: FieldValue) => void;
 }) {
   const [local, setLocal] = useState(value.value == null ? "" : String(value.value));
+  const [showCalc, setShowCalc] = useState(false);
   useEffect(() => {
     setLocal(value.value == null ? "" : String(value.value));
     // value.state re-syncs the box to empty when it's cleared to N/A.
@@ -201,17 +203,29 @@ function MultiCell({
     return (
       <div className="flex items-center gap-1.5">
         {url ? (
-          <a href={url} target="_blank" rel="noreferrer" title="Open image">
+          <button
+            type="button"
+            onClick={() => setShowCalc(true)}
+            title="Click to measure grain size"
+            className="cursor-zoom-in"
+          >
             <img
               src={url}
               alt={field.label}
               className="h-8 w-8 rounded border border-rule object-cover bg-white"
             />
-          </a>
+          </button>
         ) : (
           <span className="text-xs text-muted-foreground italic">—</span>
         )}
         <StateSelect value={value} onChange={onChange} />
+        {showCalc && url && (
+          <GrainSizeCalculator
+            imageUrl={url}
+            title={field.label}
+            onClose={() => setShowCalc(false)}
+          />
+        )}
       </div>
     );
   }

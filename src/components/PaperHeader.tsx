@@ -74,6 +74,14 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
     update.mutate({ id: paper.id, patch: { ...patch, citation_key, ...extra } });
   };
 
+  // Enter commits a single-line field (blur → onBlur commit), like clicking away.
+  const commitOnEnter = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.currentTarget.blur();
+    }
+  };
+
   // Editing a field confirms it — drop its auto-filled mark.
   const clearAuto = (key: string) => {
     if (!auto[key]) return;
@@ -251,6 +259,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
           value={state.author}
           onChange={(e) => setState({ ...state, author: e.target.value })}
           onBlur={() => commit({ author: state.author })}
+          onKeyDown={commitOnEnter}
           onFocus={() => clearAuto("author")}
           placeholder="Author(s)"
           className="bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1 font-mono"
@@ -262,6 +271,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             setState({ ...state, year: v === "" ? null : Number(v) });
           }}
           onBlur={() => commit({ year: state.year })}
+          onKeyDown={commitOnEnter}
           onFocus={() => clearAuto("year")}
           placeholder="Year"
           inputMode="numeric"
@@ -278,6 +288,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             value={state.title}
             onChange={(e) => setState({ ...state, title: e.target.value })}
             onBlur={() => commit({ title: state.title })}
+            onKeyDown={commitOnEnter}
             onFocus={() => clearAuto("title")}
             placeholder="Paper title"
             className="w-full mt-1 bg-transparent border-b border-input focus:border-primary focus:outline-none text-base font-serif italic py-1"
@@ -292,6 +303,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
               value={state.doi}
               onChange={(e) => setState({ ...state, doi: e.target.value })}
               onBlur={() => commit({ doi: state.doi })}
+              onKeyDown={commitOnEnter}
               placeholder="10.xxxx/..."
               className="flex-1 min-w-0 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm font-mono py-1"
             />
@@ -319,6 +331,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             value={state.journal}
             onChange={(e) => setState({ ...state, journal: e.target.value })}
             onBlur={() => commit({ journal: state.journal })}
+            onKeyDown={commitOnEnter}
             onFocus={() => clearAuto("journal")}
             placeholder="Journal name"
             className="w-full mt-1 bg-transparent border-b border-input focus:border-primary focus:outline-none text-sm py-1"
