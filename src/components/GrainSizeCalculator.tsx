@@ -1,5 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Maximize2, Ruler, Trash2, X, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Check,
+  Copy,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Ruler,
+  Trash2,
+  X,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 
 // ASTM E112 grain-size calculator using the intercept method.
 //
@@ -36,6 +47,38 @@ const fmt = (n: number, d = 3) => {
   if (!Number.isFinite(n)) return "—";
   return String(Number(n.toFixed(d)));
 };
+
+// Persisted per-image measurement state, keyed by the image URL so the tests
+// (lines) and calibration are saved and restored when the editor is reopened.
+interface Saved {
+  scaleMmPerPx?: number | null;
+  scaleLine?: Line | null;
+  tests?: Test[];
+  color?: string;
+  scaleFactor?: string;
+  manualGrain?: string;
+  boxCenter?: { x: number; y: number } | null;
+  boxCount?: string;
+}
+const STORE_KEY = "grain.measure.v1";
+function loadAll(): Record<string, Saved> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(STORE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+function saveForImage(url: string, s: Saved) {
+  if (typeof window === "undefined") return;
+  try {
+    const all = loadAll();
+    all[url] = s;
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(all));
+  } catch {
+    /* ignore quota errors */
+  }
+}
 
 export function GrainSizeCalculator({
   imageUrl,
@@ -74,10 +117,60 @@ export function GrainSizeCalculator({
   const [tests, setTests] = useState<Test[]>([]);
   const [copied, setCopied] = useState(false);
 
+  // Whether the committed measurement lines (scale + tests) are shown.
+  const [showLines, setShowLines] = useState(true);
+  // Guards persistence until the saved state for this image has hydrated.
+  const [hydrated, setHydrated] = useState(false);
+
   const drawing = useRef(false);
   const idRef = useRef(1);
 
   const measuring = scaleMmPerPx != null;
+
+  // Restore any saved tests/calibration for this image, then allow persistence.
+  useEffect(() => {
+    const s = loadAll()[imageUrl];
+    if (s) {
+      if (s.scaleMmPerPx != null) setScaleMmPerPx(s.scaleMmPerPx);
+      if (s.scaleLine) setScaleLine(s.scaleLine);
+      if (Array.isArray(s.tests) && s.tests.length) {
+        setTests(s.tests);
+        idRef.current = Math.max(0, ...s.tests.map((t) => t.id)) + 1;
+      }
+      if (s.color) setColor(s.color);
+      if (s.scaleFactor) setScaleFactor(s.scaleFactor);
+      if (s.manualGrain != null) setManualGrain(s.manualGrain);
+      if (s.boxCenter) setBoxCenter(s.boxCenter);
+      if (s.boxCount != null) setBoxCount(s.boxCount);
+    }
+    setHydrated(true);
+  }, [imageUrl]);
+
+  // Persist the measurement state per image (after hydration, to avoid wiping it).
+  useEffect(() => {
+    if (!hydrated) return;
+    saveForImage(imageUrl, {
+      scaleMmPerPx,
+      scaleLine,
+      tests,
+      color,
+      scaleFactor,
+      manualGrain,
+      boxCenter,
+      boxCount,
+    });
+  }, [
+    hydrated,
+    imageUrl,
+    scaleMmPerPx,
+    scaleLine,
+    tests,
+    color,
+    scaleFactor,
+    manualGrain,
+    boxCenter,
+    boxCount,
+  ]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -264,6 +357,16 @@ export function GrainSizeCalculator({
             </span>
           </div>
           <div className="flex items-center gap-1">
+            {/* Toggle the committed measurement lines on/off. */}
+            <button
+              onClick={() => setShowLines((v) => !v)}
+              className="p-1 rounded hover:bg-accent text-muted-foreground"
+              title={showLines ? "Hide measurement lines" : "Show measurement lines"}
+              aria-label={showLines ? "Hide measurement lines" : "Show measurement lines"}
+            >
+              {showLines ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+            </button>
+            <span className="mx-1 h-4 w-px bg-rule" />
             {/* Zoom controls (visual aid only — measurements are unaffected). */}
             <button
               onClick={() => zoomBy(1 / 1.25)}
@@ -332,10 +435,8 @@ export function GrainSizeCalculator({
                   viewBox={`0 0 ${natural.w} ${natural.h}`}
                   preserveAspectRatio="none"
                 >
-                  {scaleLine && strokeFor(scaleLine, "5 3")}
-                  {tests.map((t) => (
-                    <g key={t.id}>{strokeFor(t.line)}</g>
-                  ))}
+                  {showLines && scaleLine && strokeFor(scaleLine, "5 3")}
+                  {showLines && tests.map((t) => <g key={t.id}>{strokeFor(t.line)}</g>)}
                   {draft && strokeFor(draft, "6 4")}
                   {boxCenter && boxSidePx != null && (
                     <rect
@@ -467,25 +568,30 @@ export function GrainSizeCalculator({
               )}
 
               {tests.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {tests.map((t, i) => (
-                    <li
-                      key={t.id}
-                      className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1 text-[11px] font-mono"
-                    >
-                      <span>
-                        #{i + 1}: {fmt(t.lengthMm * 1000, 1)} µm / N={fmt(t.count, 1)}
-                      </span>
-                      <button
-                        onClick={() => removeTest(t.id)}
-                        className="text-muted-foreground hover:text-destructive"
-                        aria-label="Remove test"
+                <>
+                  <ul className="mt-2 space-y-1">
+                    {tests.map((t, i) => (
+                      <li
+                        key={t.id}
+                        className="flex items-center justify-between gap-2 rounded bg-muted/40 px-2 py-1 text-[11px] font-mono"
                       >
-                        <Trash2 className="h-3 w-3" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                        <span>
+                          #{i + 1}: {fmt(t.lengthMm * 1000, 1)} µm / N={fmt(t.count, 1)}
+                        </span>
+                        <button
+                          onClick={() => removeTest(t.id)}
+                          className="text-muted-foreground hover:text-destructive"
+                          aria-label="Remove test"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-[10px] text-muted-foreground italic">
+                    {tests.length} test{tests.length === 1 ? "" : "s"} saved to this image.
+                  </p>
+                </>
               )}
             </section>
 
