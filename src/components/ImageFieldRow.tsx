@@ -5,13 +5,23 @@ import { useUploadExperimentImage } from "@/lib/db";
 import { useSnip } from "@/lib/snip";
 import { FieldTooltip } from "./FieldTooltip";
 import { StateBadge } from "./StateBadge";
+import { GrainSizeCalculator } from "./GrainSizeCalculator";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, ImageUp, Loader2, Scissors, Trash2, X } from "lucide-react";
+import {
+  ChevronDown,
+  ExternalLink,
+  ImageUp,
+  Loader2,
+  Ruler,
+  Scissors,
+  Trash2,
+  X,
+} from "lucide-react";
 
 interface Props {
   field: FieldDef;
@@ -43,6 +53,7 @@ export function ImageFieldRow({
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showCalc, setShowCalc] = useState(false);
 
   const url = typeof value.value === "string" && value.value ? value.value : null;
   const requestingThis = snip.active && snip.label === field.label;
@@ -102,12 +113,26 @@ export function ImageFieldRow({
         <div className="flex flex-col gap-2 flex-1 min-w-0">
           {url ? (
             <div className="relative inline-block">
-              <a href={url} target="_blank" rel="noreferrer" title="Open full image">
+              <button
+                type="button"
+                onClick={() => setShowCalc(true)}
+                title="Click to measure grain size"
+                className="block cursor-zoom-in"
+              >
                 <img
                   src={url}
                   alt={field.label}
                   className="max-h-40 rounded border border-rule object-contain bg-white"
                 />
+              </button>
+              <a
+                href={url}
+                target="_blank"
+                rel="noreferrer"
+                title="Open full image"
+                className="absolute -bottom-2 -left-2 rounded-full bg-card border border-rule p-0.5 text-muted-foreground hover:text-copper shadow"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
               </a>
               <button
                 onClick={remove}
@@ -155,9 +180,26 @@ export function ImageFieldRow({
               onChange={onPick}
               className="hidden"
             />
+            {url && (
+              <button
+                onClick={() => setShowCalc(true)}
+                className="inline-flex items-center gap-1 rounded border border-rule px-2 py-1 text-xs hover:bg-accent"
+                title="Measure grain size by the intercept method (ASTM E112)"
+              >
+                <Ruler className="h-3 w-3 text-copper" />
+                Measure grains
+              </button>
+            )}
           </div>
           {err && <p className="text-[11px] text-destructive">{err}</p>}
         </div>
+      )}
+      {showCalc && url && (
+        <GrainSizeCalculator
+          imageUrl={url}
+          title={field.label}
+          onClose={() => setShowCalc(false)}
+        />
       )}
 
       <div className="flex items-center gap-1 pt-0.5 shrink-0">

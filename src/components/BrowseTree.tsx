@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownWideNarrow, ChevronRight, PanelLeftClose, Plus, Search } from "lucide-react";
+import {
+  ArrowDownWideNarrow,
+  Check,
+  ChevronRight,
+  PanelLeftClose,
+  Plus,
+  Search,
+} from "lucide-react";
 import type { Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
@@ -285,6 +292,9 @@ export function BrowseTree({
           const exps = shownExps(p);
           const active = p.id === selectedPaperId;
           const paperOpen = openPapers[p.id] ?? false;
+          // A paper is "done" when it has experiments and every one is reviewed.
+          const allExps = expsByPaper.get(p.id) ?? [];
+          const paperDone = allExps.length > 0 && allExps.every((e) => e.checked);
           return (
             <div key={p.id} className="mb-0.5">
               <div
@@ -310,7 +320,15 @@ export function BrowseTree({
                   }}
                   className="flex-1 text-left px-2 py-1.5 text-sm min-w-0"
                 >
-                  <div className="font-serif italic truncate">{p.citation_key || "Untitled"}</div>
+                  <div className="font-serif italic truncate flex items-center gap-1">
+                    {paperDone && (
+                      <Check
+                        className="h-3.5 w-3.5 shrink-0 text-state-filled"
+                        aria-label="All experiments reviewed"
+                      />
+                    )}
+                    <span className="truncate">{p.citation_key || "Untitled"}</span>
+                  </div>
                   <div className="text-[10px] text-muted-foreground font-mono">
                     {exps.length} exp{exps.length === 1 ? "" : "s"}
                   </div>

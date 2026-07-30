@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Experiment, Paper } from "@/lib/db";
 import { useCreateExperiment, useDeleteExperiment, useUpdateExperiment } from "@/lib/db";
 import {
@@ -27,6 +27,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Circle,
+  CheckCheck,
   Columns3,
   Copy,
   GripVertical,
@@ -462,7 +463,16 @@ export function PaperExperiments({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [posSig]);
   const dragId = useRef<string | null>(null);
+  // `overId` marks the gap the dragged tab would drop into: a chip id means
+  // "insert before that chip", the END sentinel means "drop at the end".
+  const END = "__end__";
   const [overId, setOverId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const endDrag = () => {
+    dragId.current = null;
+    setOverId(null);
+    setDraggingId(null);
+  };
   const persistOrder = (next: string[]) => {
     setOrder(next);
     // Persist the new positions (only those that actually changed).
@@ -471,15 +481,20 @@ export function PaperExperiments({
       if (e && e.position !== i) updateExp.mutate({ id, patch: { position: i } });
     });
   };
+  // Drop the dragged tab into the gap before `targetId` (or at the end when
+  // targetId is the END sentinel).
   const reorder = (targetId: string) => {
     const src = dragId.current;
-    dragId.current = null;
-    setOverId(null);
-    if (!src || src === targetId) return;
+    endDrag();
+    if (!src) return;
     const next = order.filter((id) => id !== src);
-    const at = next.indexOf(targetId);
-    if (at < 0) return;
-    next.splice(at, 0, src);
+    if (targetId === END) next.push(src);
+    else {
+      const at = next.indexOf(targetId);
+      if (at < 0) return;
+      next.splice(at, 0, src);
+    }
+    if (next.join("|") === order.join("|")) return;
     persistOrder(next);
   };
   // Compare-view tab clicks scroll that experiment's column to the far left
@@ -508,6 +523,16 @@ export function PaperExperiments({
         if (!hasInfo(valueOf(id, f.key))) setField(id, f.key, { value: null, state });
       }
     }
+  };
+
+  // "Check all done" — mark every experiment reviewed, or clear them all if
+  // they already are. (setChecked is defined above.)
+  const allChecked = experiments.length > 0 && experiments.every((e) => e.checked);
+  const toggleCheckAll = () => {
+    const next = !allChecked;
+    experiments.forEach((e) => {
+      if (e.checked !== next) setChecked(e.id, next);
+    });
   };
 
   // Compare view: for one data point, set its status across every experiment
@@ -557,54 +582,77 @@ export function PaperExperiments({
             const e = experiments.find((x) => x.id === id);
             if (!e) return null;
             const on = mode === "single" && e.id === base;
+            // A drop indicator sits in the gap *before* this chip while dragging.
+            const showBar = !!draggingId && overId === id && draggingId !== id;
             return (
-              <button
-                key={id}
-                draggable
-                onDragStart={(ev) => {
-                  dragId.current = id;
-                  ev.dataTransfer.effectAllowed = "move";
-                }}
-                onDragOver={(ev) => {
-                  ev.preventDefault();
-                  if (overId !== id) setOverId(id);
-                }}
-                onDragLeave={() => setOverId((o) => (o === id ? null : o))}
-                onDrop={(ev) => {
-                  ev.preventDefault();
-                  reorder(id);
-                }}
-                onDragEnd={() => {
-                  dragId.current = null;
-                  setOverId(null);
-                }}
-                onClick={() => {
-                  onActiveExp(e.id);
-                  // In Compare view, clicking a tab scrolls that experiment's
-                  // column to the far left (order is preserved).
-                  if (mode === "multi") requestScrollToExp(e.id);
-                }}
-                className={
-                  "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs transition-colors max-w-[14rem] cursor-grab active:cursor-grabbing " +
-                  (on
-                    ? "border-transparent text-white"
-                    : "border-rule text-muted-foreground hover:bg-accent") +
-                  (overId === id ? " ring-2 ring-copper" : "")
-                }
-                style={on ? { backgroundColor: expColor(i) } : undefined}
-                title={`${expName(e, i)} — click to ${mode === "multi" ? "move to front" : "focus"}, drag to reorder`}
-              >
-                <GripVertical className="h-3 w-3 opacity-50" />
-                <Dot i={i} className={on ? "ring-1 ring-white/70" : ""} />
-                <span className="truncate">{expName(e, i)}</span>
-                {e.checked && (
-                  <Check
-                    className={"h-3 w-3 shrink-0 " + (on ? "text-white" : "text-state-filled")}
-                  />
-                )}
-              </button>
+              <Fragment key={id}>
+                <span
+                  aria-hidden
+                  className={
+                    "self-stretch w-1 my-0.5 rounded-full transition-colors " +
+                    (showBar ? "bg-copper" : "bg-transparent")
+                  }
+                />
+                <button
+                  draggable
+                  onDragStart={(ev) => {
+                    dragId.current = id;
+                    setDraggingId(id);
+                    ev.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragOver={(ev) => {
+                    ev.preventDefault();
+                    if (overId !== id) setOverId(id);
+                  }}
+                  onDrop={(ev) => {
+                    ev.preventDefault();
+                    reorder(id);
+                  }}
+                  onDragEnd={endDrag}
+                  onClick={() => {
+                    onActiveExp(e.id);
+                    // In Compare view, clicking a tab scrolls that experiment's
+                    // column to the far left (order is preserved).
+                    if (mode === "multi") requestScrollToExp(e.id);
+                  }}
+                  className={
+                    "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs transition-[background-color,color,opacity] max-w-[14rem] cursor-grab active:cursor-grabbing " +
+                    (on
+                      ? "border-transparent text-white"
+                      : "border-rule text-muted-foreground hover:bg-accent") +
+                    (draggingId === id ? " opacity-40" : "")
+                  }
+                  style={on ? { backgroundColor: expColor(i) } : undefined}
+                  title={`${expName(e, i)} — click to ${mode === "multi" ? "scroll to front" : "focus"}, drag to reorder`}
+                >
+                  <GripVertical className="h-3 w-3 opacity-50" />
+                  <Dot i={i} className={on ? "ring-1 ring-white/70" : ""} />
+                  <span className="truncate">{expName(e, i)}</span>
+                  {e.checked && (
+                    <Check
+                      className={"h-3 w-3 shrink-0 " + (on ? "text-white" : "text-state-filled")}
+                    />
+                  )}
+                </button>
+              </Fragment>
             );
           })}
+          {/* Trailing gap — drop here to move a tab to the end. */}
+          <span
+            onDragOver={(ev) => {
+              if (!draggingId) return;
+              ev.preventDefault();
+              if (overId !== END) setOverId(END);
+            }}
+            onDrop={(ev) => {
+              ev.preventDefault();
+              reorder(END);
+            }}
+            className={
+              "self-stretch w-1 my-0.5 rounded-full transition-colors " +
+              (draggingId && overId === END ? "bg-copper" : "bg-transparent")
+            }
+          />
           <button
             onClick={addExperiment}
             disabled={createExp.isPending}
@@ -613,6 +661,23 @@ export function PaperExperiments({
             <Plus className="h-3 w-3" /> Add
           </button>
         </div>
+        <button
+          onClick={toggleCheckAll}
+          className={
+            "inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs transition-colors shrink-0 " +
+            (allChecked
+              ? "border-state-filled/50 text-state-filled hover:bg-state-filled/10"
+              : "border-rule text-muted-foreground hover:bg-accent")
+          }
+          title={
+            allChecked
+              ? "All experiments reviewed — click to clear"
+              : "Mark every experiment reviewed"
+          }
+        >
+          <CheckCheck className="h-3.5 w-3.5" />
+          {allChecked ? "All done" : "Check all done"}
+        </button>
         {allowMulti && (
           <div className="inline-flex rounded-md border border-rule overflow-hidden shrink-0">
             {(
