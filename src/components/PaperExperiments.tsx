@@ -149,6 +149,9 @@ function MassStatusMenu({
           {label}
         </div>
         <DropdownMenuItem onSelect={() => onApply("na")}>Set blanks to N/A</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onApply("needs_check")}>
+          Set blanks to Needs check
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onApply("missing")}>
           Set blanks to Missing
         </DropdownMenuItem>
