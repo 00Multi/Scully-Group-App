@@ -12,7 +12,6 @@ import type { Json } from "@/integrations/supabase/types";
 import {
   DEFAULT_SCHEMA,
   fieldsByGroup as computeFieldsByGroup,
-  withBuiltinFields,
   type FieldDef,
   type FieldType,
   type GroupDef,
@@ -104,7 +103,7 @@ function loadSchema(): Schema {
     const raw = window.localStorage.getItem(LS_SCHEMA);
     if (!raw) return cloneDefaultSchema();
     const parsed = JSON.parse(raw);
-    return isValidSchema(parsed) ? withBuiltinFields(parsed) : cloneDefaultSchema();
+    return isValidSchema(parsed) ? parsed : cloneDefaultSchema();
   } catch {
     return cloneDefaultSchema();
   }
@@ -130,7 +129,7 @@ async function fetchRemoteSchema(): Promise<Schema | null> {
     .maybeSingle();
   if (error) throw error;
   const raw = data?.schema;
-  return raw && isValidSchema(raw) ? withBuiltinFields(raw as Schema) : null;
+  return raw && isValidSchema(raw) ? (raw as Schema) : null;
 }
 
 async function saveRemoteSchema(schema: Schema): Promise<boolean> {
