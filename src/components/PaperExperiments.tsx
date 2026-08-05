@@ -1,6 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Experiment, Paper } from "@/lib/db";
-import { useCreateExperiment, useDeleteExperiment, useUpdateExperiment } from "@/lib/db";
+import {
+  pdfPublicUrl,
+  useCreateExperiment,
+  useDeleteExperiment,
+  useUpdateExperiment,
+} from "@/lib/db";
 import {
   MISSING_VALUE,
   parseFieldInput,
@@ -31,6 +36,7 @@ import {
   CheckCheck,
   Columns3,
   Copy,
+  ExternalLink,
   GripVertical,
   Layers,
   MoreHorizontal,
@@ -695,6 +701,18 @@ export function PaperExperiments({
           <CheckCheck className="h-3.5 w-3.5" />
           {allChecked ? "All done" : "Check all done"}
         </button>
+        {paper.pdf_path && (
+          <a
+            href={pdfPublicUrl(paper.pdf_path) ?? undefined}
+            target="_blank"
+            rel="noreferrer"
+            title="Open the paper PDF in a new tab"
+            className="inline-flex items-center gap-1 rounded-md border border-rule px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-copper transition-colors shrink-0"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Open paper
+          </a>
+        )}
         {allowMulti && (
           <div className="inline-flex rounded-md border border-rule overflow-hidden shrink-0">
             {(

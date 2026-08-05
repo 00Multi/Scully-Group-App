@@ -202,23 +202,80 @@ export function PdfViewer({ paper }: { paper: Paper }) {
       dragStart.current = null;
       setDrag(null);
       if (!sel || sel.w < 6 || sel.h < 6) return; // ignore tiny/stray clicks
-      // Map CSS-pixel selection to intrinsic canvas pixels.
-      const fx = canvas.width / rect.width;
-      const fy = canvas.height / rect.height;
-      const sx = sel.x * fx;
-      const sy = sel.y * fy;
-      const sw = sel.w * fx;
-      const sh = sel.h * fy;
-      const out = document.createElement("canvas");
-      out.width = Math.round(sw);
-      out.height = Math.round(sh);
-      const octx = out.getContext("2d");
-      if (!octx) return;
-      octx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-      const blob: Blob | null = await new Promise((res) => out.toBlob(res, "image/png"));
+
+      // The selection as fractions of the displayed page (0–1), so the current
+      // zoom doesn't matter — we re-render the crop from the PDF itself.
+      const fx0 = sel.x / rect.width;
+      const fy0 = sel.y / rect.height;
+      const fw = sel.w / rect.width;
+      const fh = sel.h / rect.height;
+
+      const doc = docRef.current;
+      let blob: Blob | null = null;
+      try {
+        if (doc) {
+          const pg = await doc.getPage(page);
+          // Render the page at a high, zoom-independent scale so the snip is as
+          // crisp as the vector PDF allows. Aim for ~2600px wide, clamped, and
+          // cap total pixels so huge pages don't blow up memory.
+          const base = pg.getViewport({ scale: 1 });
+          let hi = Math.max(2, Math.min(6, 2600 / base.width));
+          const MAX_AREA = 26_000_000;
+          if (base.width * base.height * hi * hi > MAX_AREA) {
+            hi = Math.sqrt(MAX_AREA / (base.width * base.height));
+          }
+          const vp = pg.getViewport({ scale: hi });
+          const full = document.createElement("canvas");
+          full.width = Math.round(vp.width);
+          full.height = Math.round(vp.height);
+          const fctx = full.getContext("2d");
+          if (fctx) {
+            await pg.render({ canvasContext: fctx, viewport: vp }).promise;
+            const sx = fx0 * full.width;
+            const sy = fy0 * full.height;
+            const sw = fw * full.width;
+            const sh = fh * full.height;
+            const out = document.createElement("canvas");
+            out.width = Math.max(1, Math.round(sw));
+            out.height = Math.max(1, Math.round(sh));
+            const octx = out.getContext("2d");
+            if (octx) {
+              octx.drawImage(full, sx, sy, sw, sh, 0, 0, out.width, out.height);
+              blob = await new Promise((res) => out.toBlob(res, "image/png"));
+            }
+          }
+        }
+      } catch {
+        blob = null;
+      }
+
+      // Fall back to cropping the on-screen canvas if the high-res render fails.
+      if (!blob) {
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const out = document.createElement("canvas");
+        out.width = Math.max(1, Math.round(sel.w * scaleX));
+        out.height = Math.max(1, Math.round(sel.h * scaleY));
+        const octx = out.getContext("2d");
+        if (octx) {
+          octx.drawImage(
+            canvas,
+            sel.x * scaleX,
+            sel.y * scaleY,
+            sel.w * scaleX,
+            sel.h * scaleY,
+            0,
+            0,
+            out.width,
+            out.height,
+          );
+          blob = await new Promise((res) => out.toBlob(res, "image/png"));
+        }
+      }
+
       if (blob) await snip.capture(blob);
     },
-    [snip, drag],
+    [snip, drag, page],
   );
 
   if (!url) {
