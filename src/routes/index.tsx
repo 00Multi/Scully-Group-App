@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePapers, useExperiments } from "@/lib/db";
-import type { FieldType } from "@/lib/fields";
+import type { Paper } from "@/lib/db";
+import type { FieldDef, FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { AutoTextarea } from "@/components/AutoTextarea";
 import { DangerZone } from "@/components/DangerZone";
@@ -76,18 +77,64 @@ function Dashboard() {
   }, [stats, fieldDefs]);
 
   // The queue can show experiments with Missing fields or Needs-check fields.
+  // Missing is listed per experiment; Needs-check is rolled up by paper (a
+  // paper appears if any of its experiments has a needs-check field).
   const [queueState, setQueueState] = useState<"missing" | "needs_check">("missing");
   const gapList = useMemo(() => {
     const paperById = new Map(papers.map((p) => [p.id, p]));
+
+    if (queueState === "needs_check") {
+      const byPaper = new Map<string, { paper: Paper; fields: Map<string, FieldDef> }>();
+      for (const e of experiments) {
+        const paper = paperById.get(e.paper_id);
+        if (!paper) continue;
+        const nc = fieldDefs.filter((f) => e.values?.[f.key]?.state === "needs_check");
+        if (nc.length === 0) continue;
+        let entry = byPaper.get(paper.id);
+        if (!entry) {
+          entry = { paper, fields: new Map() };
+          byPaper.set(paper.id, entry);
+        }
+        for (const f of nc) entry.fields.set(f.key, f);
+      }
+      return Array.from(byPaper.values())
+        .map((x) => ({
+          key: x.paper.id,
+          paper: x.paper,
+          expLabel: undefined as string | undefined,
+          expId: undefined as string | undefined,
+          fields: Array.from(x.fields.values()),
+        }))
+        .sort((a, b) => b.fields.length - a.fields.length)
+        .slice(0, 10);
+    }
+
     return experiments
       .map((e) => {
-        const flagged = fieldDefs.filter(
-          (f) => (e.values?.[f.key]?.state ?? "missing") === queueState,
+        const paper = paperById.get(e.paper_id);
+        const fields = fieldDefs.filter(
+          (f) => (e.values?.[f.key]?.state ?? "missing") === "missing",
         );
-        return { exp: e, paper: paperById.get(e.paper_id), flagged };
+        return {
+          key: e.id,
+          paper,
+          expLabel: e.label as string | undefined,
+          expId: e.id as string | undefined,
+          fields,
+        };
       })
-      .filter((x) => x.paper && x.flagged.length > 0)
-      .sort((a, b) => b.flagged.length - a.flagged.length)
+      .filter(
+        (
+          x,
+        ): x is {
+          key: string;
+          paper: Paper;
+          expLabel: string | undefined;
+          expId: string | undefined;
+          fields: FieldDef[];
+        } => !!x.paper && x.fields.length > 0,
+      )
+      .sort((a, b) => b.fields.length - a.fields.length)
       .slice(0, 10);
   }, [experiments, papers, fieldDefs, queueState]);
 
@@ -252,18 +299,20 @@ function Dashboard() {
             </div>
           ) : (
             <ul className="divide-y divide-rule/60">
-              {gapList.map(({ exp, paper, flagged }) => (
-                <li key={exp.id} className="p-4 flex items-baseline justify-between gap-4">
+              {gapList.map(({ key, paper, expLabel, expId, fields }) => (
+                <li key={key} className="p-4 flex items-baseline justify-between gap-4">
                   <div className="min-w-0">
                     <div className="font-serif italic">
-                      {paper!.citation_key || "Untitled"}
-                      <span className="text-muted-foreground text-sm not-italic font-sans">
-                        {" "}
-                        · {exp.label}
-                      </span>
+                      {paper.citation_key || "Untitled"}
+                      {expLabel && (
+                        <span className="text-muted-foreground text-sm not-italic font-sans">
+                          {" "}
+                          · {expLabel}
+                        </span>
+                      )}
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      {flagged.map((m) => (
+                      {fields.map((m) => (
                         <span
                           key={m.key}
                           className={
@@ -280,7 +329,7 @@ function Dashboard() {
                   </div>
                   <Link
                     to="/browse"
-                    search={{ paper: paper!.id, exp: exp.id }}
+                    search={expId ? { paper: paper.id, exp: expId } : { paper: paper.id }}
                     className="text-xs text-copper hover:underline shrink-0 font-mono"
                   >
                     Edit →
