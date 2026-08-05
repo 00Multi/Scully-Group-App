@@ -11,7 +11,8 @@ import {
   useSaveInstitutionGroups,
   type InstitutionGroup,
 } from "@/lib/institutionGroups";
-import { COUNTRIES, flagEmoji } from "@/lib/countries";
+import { flagEmoji } from "@/lib/countries";
+import { CountryCombobox } from "./CountryCombobox";
 import { InstitutionLogo } from "./InstitutionLogo";
 import { Check, ChevronRight, Group, Ungroup, X } from "lucide-react";
 
@@ -52,7 +53,7 @@ export function TrendsInstitutions({ papers, query }: { papers: Paper[]; query: 
   // Multi-select for grouping.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [shorthand, setShorthand] = useState("");
-  const [countryCode, setCountryCode] = useState("");
+  const [country, setCountry] = useState<{ code: string; name: string } | null>(null);
   const toggleSel = (k: string) =>
     setSelected((s) => {
       const n = new Set(s);
@@ -75,17 +76,16 @@ export function TrendsInstitutions({ papers, query }: { papers: Paper[]; query: 
         memberNames.add(inst.name);
       }
     }
-    const country = COUNTRIES.find((c) => c.code === countryCode);
     const group: InstitutionGroup = {
       id: newId(),
       shorthand: name,
-      country: country ? { code: country.code, name: country.name } : undefined,
+      country: country && country.name ? country : undefined,
       members: Array.from(memberNames),
     };
     saveGroups.mutate([...groups.filter((g) => !removeIds.has(g.id)), group]);
     setSelected(new Set());
     setShorthand("");
-    setCountryCode("");
+    setCountry(null);
   };
 
   const ungroup = (groupId: string) => saveGroups.mutate(groups.filter((g) => g.id !== groupId));
@@ -176,19 +176,14 @@ export function TrendsInstitutions({ papers, query }: { papers: Paper[]; query: 
                 placeholder="Group shorthand (e.g. MIT)"
                 className="bg-background border border-input rounded px-2 py-1 text-xs w-48 focus:outline-none focus:border-primary"
               />
-              <select
-                value={countryCode}
-                onChange={(e) => setCountryCode(e.target.value)}
-                className="bg-background border border-input rounded px-1.5 py-1 text-xs"
-                aria-label="Group country"
-              >
-                <option value="">Country…</option>
-                {COUNTRIES.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {flagEmoji(c.code)} {c.name}
-                  </option>
-                ))}
-              </select>
+              <CountryCombobox
+                value={country}
+                onChange={setCountry}
+                placeholder="Type a country…"
+              />
+              {country?.name && !country.code && (
+                <span className="text-[10px] text-muted-foreground">({country.name})</span>
+              )}
               <button
                 onClick={createGroup}
                 disabled={!shorthand.trim()}
