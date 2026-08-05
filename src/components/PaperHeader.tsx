@@ -11,6 +11,7 @@ import { fetchCrossref, isLikelyDoi } from "@/lib/crossref";
 import { useFieldDefs } from "@/lib/settings";
 import { AutoTextarea } from "./AutoTextarea";
 import { InstitutionEditor } from "./InstitutionEditor";
+import { CountryEditor } from "./CountryEditor";
 import { VariablesSelect } from "./VariablesSelect";
 import { FileUp, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 
@@ -342,6 +343,12 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             Institution(s)
           </label>
           <InstitutionEditor paper={paper} />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            Country / countries
+          </label>
+          <CountryEditor paper={paper} />
         </div>
         <div className="md:col-span-2">
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">

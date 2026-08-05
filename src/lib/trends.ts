@@ -5,6 +5,8 @@
 import type { Experiment, Paper } from "./db";
 import type { FieldDef, GroupDef } from "./fields";
 import { readInstitutionRefs, type Institution } from "./ror";
+import { readPaperCountries } from "./countries";
+import { groupByMember, type InstitutionGroup } from "./institutionGroups";
 
 export interface Bucket {
   label: string;
@@ -123,29 +125,87 @@ export function paperFieldDistribution(
 
 export interface InstitutionCount extends Institution {
   count: number;
+  groupId?: string; // set when this row is a user-defined group
+  members?: string[]; // raw names folded into a group
 }
 
 // Papers per institution, enriched with the best country/domain seen for that
-// name across the dataset (so a flag/logo can be shown).
-export function institutionCounts(papers: Paper[]): InstitutionCount[] {
+// name across the dataset (so a flag/logo can be shown). Institution groups fold
+// their member variants into one row under the shorthand + group country.
+export function institutionCounts(
+  papers: Paper[],
+  groups: InstitutionGroup[] = [],
+): InstitutionCount[] {
+  const byMember = groupByMember(groups);
   const m = new Map<string, InstitutionCount>();
   for (const p of papers) {
+    // Count each institution (or group) at most once per paper.
+    const seen = new Set<string>();
     for (const inst of readInstitutionRefs(p)) {
-      const key = inst.name.toLowerCase();
+      const grp = byMember.get(inst.name.trim().toLowerCase());
+      const key = grp ? `g:${grp.id}` : inst.name.toLowerCase();
+      const first = !seen.has(key);
+      seen.add(key);
       const prev = m.get(key);
       if (prev) {
-        prev.count++;
+        if (first) prev.count++;
         if (!prev.domain && inst.domain) prev.domain = inst.domain;
-        if (!prev.countryCode && inst.countryCode) {
+        if (!grp && !prev.countryCode && inst.countryCode) {
           prev.countryCode = inst.countryCode;
           prev.countryName = inst.countryName;
         }
+        if (grp && prev.members && !prev.members.includes(inst.name)) prev.members.push(inst.name);
+      } else if (grp) {
+        m.set(key, {
+          name: grp.shorthand,
+          domain: inst.domain,
+          countryCode: grp.country?.code,
+          countryName: grp.country?.name,
+          count: 1,
+          groupId: grp.id,
+          members: [inst.name],
+        });
       } else {
         m.set(key, { ...inst, count: 1 });
       }
     }
   }
   return Array.from(m.values()).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+export interface CountryCount {
+  code: string;
+  name: string;
+  count: number;
+}
+
+// Papers per country, from the per-paper Country tags (one paper can list
+// several countries; each is counted once per paper).
+export function countryCounts(papers: Paper[]): CountryCount[] {
+  const m = new Map<string, { name: string; count: number }>();
+  for (const p of papers) {
+    const seen = new Set<string>();
+    for (const c of readPaperCountries(p.meta)) {
+      if (seen.has(c.code)) continue;
+      seen.add(c.code);
+      const prev = m.get(c.code);
+      if (prev) prev.count++;
+      else m.set(c.code, { name: c.name, count: 1 });
+    }
+  }
+  return Array.from(m.entries())
+    .map(([code, v]) => ({ code, name: v.name, count: v.count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
+// Institutions (grouped) whose resolved country matches `code` — the drill-down
+// shown when a country is clicked on Trends.
+export function institutionsForCountry(
+  papers: Paper[],
+  groups: InstitutionGroup[],
+  code: string,
+): InstitutionCount[] {
+  return institutionCounts(papers, groups).filter((i) => i.countryCode === code);
 }
 
 export function papersPerYear(papers: Paper[]): Bucket[] {
