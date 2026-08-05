@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { usePapers, useExperiments } from "@/lib/db";
 import type { FieldType } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
@@ -11,7 +11,7 @@ import {
   numericHistogram,
   papersPerYear as computePapersPerYear,
 } from "@/lib/trends";
-import { ArrowRight, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowRight, GripVertical, Plus, RotateCcw, Trash2 } from "lucide-react";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -75,17 +75,21 @@ function Dashboard() {
       .slice(0, 6);
   }, [stats, fieldDefs]);
 
+  // The queue can show experiments with Missing fields or Needs-check fields.
+  const [queueState, setQueueState] = useState<"missing" | "needs_check">("missing");
   const gapList = useMemo(() => {
     const paperById = new Map(papers.map((p) => [p.id, p]));
     return experiments
       .map((e) => {
-        const missing = fieldDefs.filter((f) => e.values?.[f.key]?.state === "missing");
-        return { exp: e, paper: paperById.get(e.paper_id), missing };
+        const flagged = fieldDefs.filter(
+          (f) => (e.values?.[f.key]?.state ?? "missing") === queueState,
+        );
+        return { exp: e, paper: paperById.get(e.paper_id), flagged };
       })
-      .filter((x) => x.paper && x.missing.length > 0)
-      .sort((a, b) => b.missing.length - a.missing.length)
+      .filter((x) => x.paper && x.flagged.length > 0)
+      .sort((a, b) => b.flagged.length - a.flagged.length)
       .slice(0, 10);
-  }, [experiments, papers, fieldDefs]);
+  }, [experiments, papers, fieldDefs, queueState]);
 
   const overallPct = stats.totalCells ? Math.round((stats.filled / stats.totalCells) * 100) : 0;
 
@@ -208,8 +212,33 @@ function Dashboard() {
       )}
 
       <section className="mb-10">
-        <div className="flex items-baseline justify-between mb-3">
-          <h2 className="text-2xl font-serif italic">Missing-data queue</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-3 mb-3">
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-serif italic">
+              {queueState === "missing" ? "Missing-data queue" : "Needs-check queue"}
+            </h2>
+            <div className="inline-flex rounded-md border border-rule overflow-hidden text-xs">
+              {(
+                [
+                  ["missing", "Missing"],
+                  ["needs_check", "Needs check"],
+                ] as ["missing" | "needs_check", string][]
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setQueueState(key)}
+                  className={
+                    "px-2.5 py-1 transition-colors " +
+                    (queueState === key
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-accent text-muted-foreground")
+                  }
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <Link to="/browse" className="text-xs text-copper hover:underline">
             Open browser →
           </Link>
@@ -217,11 +246,13 @@ function Dashboard() {
         <div className="rounded-lg border border-rule bg-card overflow-hidden">
           {gapList.length === 0 ? (
             <div className="p-6 text-sm text-muted-foreground italic">
-              Nothing missing. Add a paper in Browse to start.
+              {queueState === "missing"
+                ? "Nothing missing. Add a paper in Browse to start."
+                : "No fields are marked Needs check."}
             </div>
           ) : (
             <ul className="divide-y divide-rule/60">
-              {gapList.map(({ exp, paper, missing }) => (
+              {gapList.map(({ exp, paper, flagged }) => (
                 <li key={exp.id} className="p-4 flex items-baseline justify-between gap-4">
                   <div className="min-w-0">
                     <div className="font-serif italic">
@@ -232,10 +263,15 @@ function Dashboard() {
                       </span>
                     </div>
                     <div className="mt-1 flex flex-wrap gap-1">
-                      {missing.map((m) => (
+                      {flagged.map((m) => (
                         <span
                           key={m.key}
-                          className="field-tag bg-state-missing/10 text-state-missing"
+                          className={
+                            "field-tag " +
+                            (queueState === "missing"
+                              ? "bg-state-missing/10 text-state-missing"
+                              : "bg-state-check/10 text-state-check")
+                          }
                         >
                           {m.label}
                         </span>
@@ -314,11 +350,16 @@ function SchemaManager() {
     addField,
     updateField,
     deleteField,
+    moveField,
     addGroup,
     renameGroup,
     deleteGroup,
     resetSchema,
   } = useSettings();
+
+  // Drag-to-reorder data points (changes the order they appear in the viewer).
+  const dragKey = useRef<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
 
   return (
     <section className="mb-10">
@@ -378,7 +419,8 @@ function SchemaManager() {
               </button>
             </div>
 
-            <div className="hidden md:grid grid-cols-[1fr_5rem_6rem_7rem_2fr_auto] gap-3 px-4 py-2 border-b border-rule/60 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            <div className="hidden md:grid grid-cols-[1rem_1fr_5rem_6rem_7rem_2fr_auto] gap-3 px-4 py-2 border-b border-rule/60 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+              <div></div>
               <div>Data point</div>
               <div>Type</div>
               <div>Unit</div>
@@ -390,8 +432,38 @@ function SchemaManager() {
             {(fieldsByGroup[group.id] ?? []).map((f) => (
               <div
                 key={f.key}
-                className="grid grid-cols-1 md:grid-cols-[1fr_5rem_6rem_7rem_2fr_auto] gap-2 md:gap-3 px-4 py-2 border-b border-rule/60 last:border-0 items-start"
+                onDragOver={(e) => {
+                  if (!dragKey.current) return;
+                  e.preventDefault();
+                  if (overKey !== f.key) setOverKey(f.key);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragKey.current) moveField(dragKey.current, f.key);
+                  dragKey.current = null;
+                  setOverKey(null);
+                }}
+                className={
+                  "grid grid-cols-1 md:grid-cols-[1rem_1fr_5rem_6rem_7rem_2fr_auto] gap-2 md:gap-3 px-4 py-2 border-b border-rule/60 last:border-0 items-start " +
+                  (overKey === f.key ? "ring-2 ring-copper rounded" : "")
+                }
               >
+                <button
+                  draggable
+                  onDragStart={(e) => {
+                    dragKey.current = f.key;
+                    e.dataTransfer.effectAllowed = "move";
+                  }}
+                  onDragEnd={() => {
+                    dragKey.current = null;
+                    setOverKey(null);
+                  }}
+                  title="Drag to reorder this data point"
+                  aria-label="Reorder data point"
+                  className="hidden md:flex items-center justify-center pt-1.5 text-muted-foreground/60 hover:text-foreground cursor-grab active:cursor-grabbing"
+                >
+                  <GripVertical className="h-4 w-4" />
+                </button>
                 <input
                   value={f.label}
                   onChange={(e) => updateField(f.key, { label: e.target.value })}

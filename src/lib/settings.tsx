@@ -50,6 +50,8 @@ interface SettingsCtx {
   addImportedFields: (fields: FieldDef[]) => void;
   updateField: (key: string, patch: Partial<FieldDef>) => void;
   deleteField: (key: string) => void;
+  // Reorder a data point to sit just before another (drives the viewer order).
+  moveField: (dragKey: string, overKey: string) => void;
 
   // Columns (groups)
   addGroup: (label?: string) => string;
@@ -294,6 +296,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       setSchema((prev) => ({ ...prev, fields: prev.fields.filter((f) => f.key !== key) }));
     };
 
+    const moveField: SettingsCtx["moveField"] = (dragKey, overKey) => {
+      if (dragKey === overKey) return;
+      setSchema((prev) => {
+        const fields = [...prev.fields];
+        const from = fields.findIndex((f) => f.key === dragKey);
+        if (from < 0) return prev;
+        const [moved] = fields.splice(from, 1);
+        const to = fields.findIndex((f) => f.key === overKey);
+        if (to < 0) return prev;
+        fields.splice(to, 0, moved);
+        return { ...prev, fields };
+      });
+    };
+
     const addGroup: SettingsCtx["addGroup"] = (label) => {
       const name = label?.trim() || "New column";
       let newId = "";
@@ -331,6 +347,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       addImportedFields,
       updateField,
       deleteField,
+      moveField,
       addGroup,
       renameGroup,
       deleteGroup,
