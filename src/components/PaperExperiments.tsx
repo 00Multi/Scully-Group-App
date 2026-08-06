@@ -16,6 +16,7 @@ import {
   type FieldValue,
 } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
+import { useHistory } from "@/lib/history";
 import { expColor } from "@/lib/expColors";
 import { FieldRow } from "./FieldRow";
 import { ImageFieldRow } from "./ImageFieldRow";
@@ -60,6 +61,16 @@ const fvEqual = (a: FieldValue, b: FieldValue) =>
   a.state === b.state &&
   (a.value ?? null) === (b.value ?? null) &&
   (a.note ?? null) === (b.note ?? null);
+
+// Compare two per-experiment value maps, treating an absent key as Missing, so
+// undo/redo only records a step when the persisted data actually changed.
+const valuesMapEqual = (a: Record<string, FieldValue>, b: Record<string, FieldValue>): boolean => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) {
+    if (!fvEqual(a[k] ?? MISSING_VALUE, b[k] ?? MISSING_VALUE)) return false;
+  }
+  return true;
+};
 
 // ---- A small coloured dot for an experiment ----
 function Dot({ i, className = "" }: { i: number; className?: string }) {
@@ -277,6 +288,7 @@ export function PaperExperiments({
   onActiveExp: (id: string | null) => void;
 }) {
   const { groups, fieldsByGroup, addField, deleteField } = useSettings();
+  const { record } = useHistory();
   const updateExp = useUpdateExperiment();
   const createExp = useCreateExperiment();
   const deleteExp = useDeleteExperiment();
@@ -304,8 +316,14 @@ export function PaperExperiments({
   // round-trips (updated_at changes) — never mid-typing.
   const sig = experiments.map((e) => `${e.id}:${e.updated_at}`).join("|");
   const [drafts, setDrafts] = useState<Record<string, Record<string, FieldValue>>>({});
+  // The last values persisted for each experiment. Seeded from the store on
+  // every save round-trip and kept in step by writeRawValues, it is the base a
+  // flush diffs against to record one undo step per coalesced edit.
+  const savedRef = useRef<Record<string, Record<string, FieldValue>>>({});
   useEffect(() => {
-    setDrafts(Object.fromEntries(experiments.map((e) => [e.id, withDefaults(e.values)])));
+    const map = Object.fromEntries(experiments.map((e) => [e.id, withDefaults(e.values)]));
+    setDrafts(map);
+    savedRef.current = map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
@@ -314,11 +332,29 @@ export function PaperExperiments({
     draftsRef.current = drafts;
   }, [drafts]);
 
-  // Debounced per-experiment save, flushed on unmount so nothing is lost.
+  // Write values to the store without recording history — used by undo/redo and
+  // as the primitive the recording flush builds on. Keeps savedRef in step so a
+  // later user edit diffs against what is actually persisted.
+  const writeRawValues = (expId: string, vals: Record<string, FieldValue>) => {
+    savedRef.current = { ...savedRef.current, [expId]: vals };
+    updateExp.mutate({ id: expId, patch: { values: vals } });
+  };
+
+  // Debounced per-experiment save, flushed on unmount so nothing is lost. Each
+  // flush that actually changes the data records a single undo step covering
+  // every field touched since the previous save.
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const flush = (expId: string) => {
     const vals = draftsRef.current[expId];
-    if (vals) updateExp.mutate({ id: expId, patch: { values: vals } });
+    if (!vals) return;
+    const prev = savedRef.current[expId] ?? {};
+    if (valuesMapEqual(prev, vals)) return;
+    writeRawValues(expId, vals);
+    record({
+      label: "Edit experiment data",
+      undo: () => writeRawValues(expId, prev),
+      redo: () => writeRawValues(expId, vals),
+    });
   };
   const schedule = (expId: string) => {
     if (timers.current[expId]) clearTimeout(timers.current[expId]);
@@ -440,6 +476,24 @@ export function PaperExperiments({
     [groups, fieldsByGroup],
   );
 
+  // Record a just-created experiment so undo deletes it and redo re-creates it.
+  // Re-creation yields a fresh id, tracked in `holder` so a later undo targets
+  // the current row.
+  const recordCreated = (
+    input: Parameters<typeof createExp.mutateAsync>[0],
+    createdId: string,
+    label: string,
+  ) => {
+    const holder = { id: createdId };
+    record({
+      label,
+      undo: () => deleteExp.mutate(holder.id),
+      redo: async () => {
+        const c = await createExp.mutateAsync(input);
+        if (c?.id) holder.id = c.id;
+      },
+    });
+  };
   const addExperiment = async () => {
     // Seed the new experiment with only the data points that are currently
     // shared ("all experiments") across every existing experiment, so those
@@ -452,29 +506,60 @@ export function PaperExperiments({
       const c = commonValue(f.key);
       if (c && c.state !== "missing") seed[f.key] = { ...c };
     }
-    const created = await createExp.mutateAsync({
+    const input = {
       paper_id: paper.id,
       label: `Experiment ${experiments.length + 1}`,
       position: experiments.length,
       values: Object.keys(seed).length ? seed : undefined,
-    });
-    if (created?.id) onActiveExp(created.id);
+    };
+    const created = await createExp.mutateAsync(input);
+    if (created?.id) {
+      onActiveExp(created.id);
+      recordCreated(input, created.id, "Add experiment");
+    }
   };
-  const duplicate = (e: Experiment, i: number) => {
-    createExp.mutate({
+  const duplicate = async (e: Experiment, i: number) => {
+    const input = {
       paper_id: paper.id,
       label: `${expName(e, i)} (copy)`,
       position: experiments.length,
       values: withDefaults(e.values),
-    });
+    };
+    const created = await createExp.mutateAsync(input);
+    if (created?.id) recordCreated(input, created.id, "Duplicate experiment");
   };
   const remove = (e: Experiment) => {
     if (!confirm("Delete this experiment row?")) return;
+    const snapshot = {
+      paper_id: paper.id,
+      label: e.label,
+      position: e.position,
+      values: withDefaults(e.values),
+    };
+    const holder = { id: e.id };
     deleteExp.mutate(e.id);
     if (e.id === base) onActiveExp(null);
+    record({
+      label: "Delete experiment",
+      undo: async () => {
+        const c = await createExp.mutateAsync(snapshot);
+        if (c?.id) holder.id = c.id;
+      },
+      redo: () => deleteExp.mutate(holder.id),
+    });
+  };
+  const renameExp = (id: string, label: string) => {
+    const prev = experiments.find((e) => e.id === id)?.label ?? "";
+    if (prev === label) return;
+    updateExp.mutate({ id, patch: { label } });
+    record({
+      label: "Rename experiment",
+      undo: () => updateExp.mutate({ id, patch: { label: prev } }),
+      redo: () => updateExp.mutate({ id, patch: { label } }),
+    });
   };
   const renameBase = (label: string) => {
-    if (baseIsExp) updateExp.mutate({ id: base, patch: { label } });
+    if (baseIsExp) renameExp(base, label);
   };
 
   // Drag-to-reorder for the experiment chips. `order` is a local view that
@@ -496,13 +581,24 @@ export function PaperExperiments({
     setOverId(null);
     setDraggingId(null);
   };
+  const applyOrder = (ids: string[]) => {
+    ids.forEach((id, i) => updateExp.mutate({ id, patch: { position: i } }));
+  };
   const persistOrder = (next: string[]) => {
+    const prevOrder = experiments.map((e) => e.id);
     setOrder(next);
     // Persist the new positions (only those that actually changed).
     next.forEach((id, i) => {
       const e = experiments.find((x) => x.id === id);
       if (e && e.position !== i) updateExp.mutate({ id, patch: { position: i } });
     });
+    if (prevOrder.join("|") !== next.join("|")) {
+      record({
+        label: "Reorder experiments",
+        undo: () => applyOrder(prevOrder),
+        redo: () => applyOrder(next),
+      });
+    }
   };
   // Drop the dragged tab into the gap before `targetId` (or at the end when
   // targetId is the END sentinel).
@@ -529,7 +625,17 @@ export function PaperExperiments({
   const requestScrollToExp = (id: string) => setScrollToExp((s) => ({ id, nonce: s.nonce + 1 }));
 
   // Per-experiment manual "reviewed" checkmark.
-  const setChecked = (id: string, checked: boolean) => updateExp.mutate({ id, patch: { checked } });
+  const setChecked = (id: string, checked: boolean) => {
+    const prev = experiments.find((e) => e.id === id)?.checked ?? false;
+    updateExp.mutate({ id, patch: { checked } });
+    if (prev !== checked) {
+      record({
+        label: checked ? "Mark reviewed" : "Unmark reviewed",
+        undo: () => updateExp.mutate({ id, patch: { checked: prev } }),
+        redo: () => updateExp.mutate({ id, patch: { checked } }),
+      });
+    }
+  };
 
   // A cell "has info" once the user has entered a value — mass status actions
   // never overwrite those.
@@ -779,7 +885,7 @@ export function PaperExperiments({
           onActiveExp={onActiveExp}
           onDuplicate={duplicate}
           onRemove={remove}
-          onRename={(id, label) => updateExp.mutate({ id, patch: { label } })}
+          onRename={renameExp}
           onToggleChecked={setChecked}
           onMarkRow={markRowBlanks}
           scrollToExp={scrollToExp}

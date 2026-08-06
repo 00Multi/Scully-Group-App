@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { fetchCrossref, isLikelyDoi } from "@/lib/crossref";
 import { useFieldDefs } from "@/lib/settings";
+import { useHistory, inversePatch } from "@/lib/history";
 import { AutoTextarea } from "./AutoTextarea";
 import { InstitutionEditor } from "./InstitutionEditor";
 import { CountryEditor } from "./CountryEditor";
@@ -33,6 +34,7 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
   const uploadPdf = useUploadPaperPdf();
   const removePdf = useRemovePaperPdf();
   const fieldDefs = useFieldDefs();
+  const { record } = useHistory();
   const fileRef = useRef<HTMLInputElement>(null);
 
   // Variables studied are a paper-level tag set. Toggle one on/off and persist.
@@ -40,6 +42,11 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
     const cur = paper.variables ?? [];
     const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
     update.mutate({ id: paper.id, patch: { variables: next } });
+    record({
+      label: cur.includes(key) ? "Remove variable" : "Add variable",
+      undo: () => update.mutate({ id: paper.id, patch: { variables: cur } }),
+      redo: () => update.mutate({ id: paper.id, patch: { variables: next } }),
+    });
   };
 
   const draft = (p: Paper): Draft => ({
@@ -58,11 +65,17 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
   const [prefilling, setPrefilling] = useState(false);
   const [prefillMsg, setPrefillMsg] = useState<string | null>(null);
 
+  // Resync the editable draft from the store whenever the persisted paper
+  // changes — on navigation (id) and after any save round-trip (updated_at), so
+  // an undo/redo of a metadata edit is reflected in the inputs. Saves only
+  // happen on blur, so this never clobbers mid-typing.
   useEffect(() => {
     setState(draft(paper));
     setAuto(paper.auto_filled ?? {});
-    setPrefillMsg(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paper.id, paper.updated_at]);
+  useEffect(() => {
+    setPrefillMsg(null);
   }, [paper.id]);
 
   const commit = (patch: Partial<Draft>, extra?: Partial<Paper>) => {
@@ -72,7 +85,20 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
       next.author && next.year
         ? `${next.author.split(/[\s,]+/)[0]} ${next.year}`
         : paper.citation_key;
-    update.mutate({ id: paper.id, patch: { ...patch, citation_key, ...extra } });
+    const finalPatch = { ...patch, citation_key, ...extra } as Partial<Paper>;
+    const prevPatch = inversePatch(paper, finalPatch);
+    update.mutate({ id: paper.id, patch: finalPatch });
+    // Record only when a persisted value actually changed.
+    const changed = (Object.keys(finalPatch) as (keyof Paper)[]).some(
+      (k) => paper[k] !== finalPatch[k],
+    );
+    if (changed) {
+      record({
+        label: "Edit paper details",
+        undo: () => update.mutate({ id: paper.id, patch: prevPatch }),
+        redo: () => update.mutate({ id: paper.id, patch: finalPatch }),
+      });
+    }
   };
 
   // Enter commits a single-line field (blur → onBlur commit), like clicking away.
