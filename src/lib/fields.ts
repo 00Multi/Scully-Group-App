@@ -285,6 +285,39 @@ export function withDefaults(
 // A blank value used when an experiment has no stored entry for a field yet.
 export const MISSING_VALUE: FieldValue = { value: null, state: "missing" };
 
+// ---- Image fields ----
+// An image field can hold several images. They live in FieldValue.value as
+// either a legacy single URL string (older data, one image) or a JSON-encoded
+// array of URL strings (one or more images). These helpers hide that so callers
+// always work with a plain string[].
+export function imageUrls(value: FieldValue | null | undefined): string[] {
+  const v = value?.value;
+  if (typeof v !== "string") return [];
+  const s = v.trim();
+  if (!s) return [];
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) {
+        return arr.filter((u): u is string => typeof u === "string" && u.length > 0);
+      }
+    } catch {
+      // Not valid JSON — fall through and treat the whole string as one URL.
+    }
+  }
+  return [s];
+}
+
+// Encode a list of image URLs back into FieldValue.value. An empty list stores
+// null; a single image is kept as a bare URL string so it stays compatible with
+// anything still reading value.value directly.
+export function serializeImageUrls(urls: string[]): string | null {
+  const clean = urls.filter((u) => typeof u === "string" && u.length > 0);
+  if (clean.length === 0) return null;
+  if (clean.length === 1) return clean[0];
+  return JSON.stringify(clean);
+}
+
 // Inputs that mean "not applicable" — typing one auto-sets the N/A state.
 const NA_INPUTS = new Set(["n/a", "na", "n.a.", "not applicable"]);
 

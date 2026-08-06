@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import type { FieldDef, FieldState, FieldValue } from "@/lib/fields";
-import { STATE_LABELS } from "@/lib/fields";
+import { STATE_LABELS, imageUrls, serializeImageUrls } from "@/lib/fields";
 import { useUploadExperimentImage } from "@/lib/db";
 import { useSnip } from "@/lib/snip";
 import { FieldTooltip } from "./FieldTooltip";
@@ -12,16 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  ChevronDown,
-  ExternalLink,
-  ImageUp,
-  Loader2,
-  Ruler,
-  Scissors,
-  Trash2,
-  X,
-} from "lucide-react";
+import { ChevronDown, ExternalLink, ImageUp, Loader2, Scissors, Trash2, X } from "lucide-react";
 
 interface Props {
   field: FieldDef;
@@ -53,11 +44,12 @@ export function ImageFieldRow({
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showCalc, setShowCalc] = useState(false);
+  const [calcUrl, setCalcUrl] = useState<string | null>(null);
 
-  const url = typeof value.value === "string" && value.value ? value.value : null;
+  const urls = imageUrls(value);
   const requestingThis = snip.active && snip.label === field.label;
 
+  // Append a freshly-uploaded image to the list, keeping any existing ones.
   const store = async (blob: Blob, ext = "png") => {
     setErr(null);
     setBusy(true);
@@ -69,7 +61,7 @@ export function ImageFieldRow({
         blob,
         ext,
       });
-      onChange({ ...value, value: publicUrl, state: "filled" });
+      onChange({ ...value, value: serializeImageUrls([...urls, publicUrl]), state: "filled" });
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Upload failed.");
     } finally {
@@ -80,18 +72,31 @@ export function ImageFieldRow({
   const onSnip = () => snip.request(field.label, (blob) => store(blob, "png"));
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
+    const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!f) return;
-    if (!f.type.startsWith("image/")) {
+    if (files.length === 0) return;
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) {
       setErr("Please choose an image file.");
       return;
     }
-    const ext = f.name.split(".").pop()?.toLowerCase() || "png";
-    store(f, ext);
+    // Upload sequentially so each append sees the previous one.
+    void (async () => {
+      for (const f of images) {
+        const ext = f.name.split(".").pop()?.toLowerCase() || "png";
+        await store(f, ext);
+      }
+    })();
   };
 
-  const remove = () => onChange({ ...value, value: null, state: "missing" });
+  const removeAt = (i: number) => {
+    const next = urls.filter((_, idx) => idx !== i);
+    onChange({
+      ...value,
+      value: serializeImageUrls(next),
+      state: next.length ? "filled" : "missing",
+    });
+  };
 
   return (
     <div className="group flex items-start gap-2 py-2 border-b border-rule/60 last:border-0">
@@ -111,36 +116,40 @@ export function ImageFieldRow({
         </div>
       ) : (
         <div className="flex flex-col gap-2 flex-1 min-w-0">
-          {url ? (
-            <div className="relative inline-block">
-              <button
-                type="button"
-                onClick={() => setShowCalc(true)}
-                title="Click to measure grain size"
-                className="block cursor-zoom-in"
-              >
-                <img
-                  src={url}
-                  alt={field.label}
-                  className="max-h-40 rounded border border-rule object-contain bg-white"
-                />
-              </button>
-              <a
-                href={url}
-                target="_blank"
-                rel="noreferrer"
-                title="Open full image"
-                className="absolute -bottom-2 -left-2 rounded-full bg-card border border-rule p-0.5 text-muted-foreground hover:text-copper shadow"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-              <button
-                onClick={remove}
-                title="Remove image"
-                className="absolute -top-2 -right-2 rounded-full bg-card border border-rule p-0.5 text-muted-foreground hover:text-destructive shadow"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+          {urls.length > 0 ? (
+            <div className="flex flex-wrap gap-3">
+              {urls.map((u, i) => (
+                <div key={`${i}-${u}`} className="relative inline-block">
+                  <button
+                    type="button"
+                    onClick={() => setCalcUrl(u)}
+                    title="Click to measure grain size"
+                    className="block cursor-zoom-in"
+                  >
+                    <img
+                      src={u}
+                      alt={`${field.label} ${i + 1}`}
+                      className="max-h-40 rounded border border-rule object-contain bg-white"
+                    />
+                  </button>
+                  <a
+                    href={u}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Open full image"
+                    className="absolute -bottom-2 -left-2 rounded-full bg-card border border-rule p-0.5 text-muted-foreground hover:text-copper shadow"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                  <button
+                    onClick={() => removeAt(i)}
+                    title="Remove image"
+                    className="absolute -top-2 -right-2 rounded-full bg-card border border-rule p-0.5 text-muted-foreground hover:text-destructive shadow"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="text-xs text-muted-foreground italic">No image yet.</div>
@@ -159,7 +168,7 @@ export function ImageFieldRow({
               title="Capture a region from the PDF (open Split or Paper view)"
             >
               <Scissors className="h-3 w-3" />
-              {requestingThis ? "Drag on the PDF…" : url ? "Re-snip" : "Snip from PDF"}
+              {requestingThis ? "Drag on the PDF…" : urls.length ? "Add snip" : "Snip from PDF"}
             </button>
             <button
               onClick={() => fileRef.current?.click()}
@@ -171,34 +180,25 @@ export function ImageFieldRow({
               ) : (
                 <ImageUp className="h-3 w-3" />
               )}
-              Upload
+              {urls.length ? "Add image" : "Upload"}
             </button>
             <input
               ref={fileRef}
               type="file"
               accept="image/*"
+              multiple
               onChange={onPick}
               className="hidden"
             />
-            {url && (
-              <button
-                onClick={() => setShowCalc(true)}
-                className="inline-flex items-center gap-1 rounded border border-rule px-2 py-1 text-xs hover:bg-accent"
-                title="Measure grain size by the intercept method (ASTM E112)"
-              >
-                <Ruler className="h-3 w-3 text-copper" />
-                Measure grains
-              </button>
-            )}
           </div>
           {err && <p className="text-[11px] text-destructive">{err}</p>}
         </div>
       )}
-      {showCalc && url && (
+      {calcUrl && (
         <GrainSizeCalculator
-          imageUrl={url}
+          imageUrl={calcUrl}
           title={field.label}
-          onClose={() => setShowCalc(false)}
+          onClose={() => setCalcUrl(null)}
         />
       )}
 

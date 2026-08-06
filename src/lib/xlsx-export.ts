@@ -4,7 +4,7 @@
 
 import * as XLSX from "xlsx";
 import type { Experiment, Paper } from "./db";
-import type { FieldDef, FieldValue, GroupDef } from "./fields";
+import { imageUrls, type FieldDef, type FieldValue, type GroupDef } from "./fields";
 
 // A selectable paper-metadata column. `key` is either a top-level Paper column
 // or a key inside paper.meta (see metaValue).
@@ -92,6 +92,15 @@ function fieldHeader(f: FieldDef): string {
   return f.unit ? `${f.label} (${f.unit})` : f.label;
 }
 
+// Flat-cell text for one field. Image fields list every image URL (newline
+// separated) instead of the raw JSON the value is stored as.
+function flatCell(f: FieldDef, v: FieldValue | undefined): string {
+  if (f.type === "image") {
+    return v && v.state === "filled" ? imageUrls(v).join("\n") : displayValue(v);
+  }
+  return displayValue(v);
+}
+
 // Experiment data-point fields, excluding alloy_type (emitted as its own column).
 function orderedFieldsOf(data: ExportData): FieldDef[] {
   return data.groups.flatMap((g) =>
@@ -130,7 +139,7 @@ export function downloadXlsx(data: ExportData, filename: string) {
       alloyTypeOf(exp),
       exp.label,
     ];
-    for (const f of orderedFields) row.push(displayValue(exp.values?.[f.key]));
+    for (const f of orderedFields) row.push(flatCell(f, exp.values?.[f.key]));
     aoa.push(row);
   }
 
@@ -178,7 +187,7 @@ export function buildCsv(data: ExportData): string {
       ...data.meta.map((m) => metaValue(p, m.key)),
       alloyTypeOf(exp),
       exp.label,
-      ...orderedFields.map((f) => displayValue(exp.values?.[f.key])),
+      ...orderedFields.map((f) => flatCell(f, exp.values?.[f.key])),
     ];
     lines.push(row.map(csvCell).join(","));
   }
@@ -275,10 +284,14 @@ export function buildReportHtml(data: ExportData): string {
           .map((f) => {
             const fv = e.values?.[f.key];
             if (f.type === "image") {
-              const src =
-                fv && fv.state === "filled" && typeof fv.value === "string" ? fv.value : "";
-              return src
-                ? `<tr><th>${esc(f.label)}</th><td><img src="${esc(src)}" style="max-height:200px;max-width:100%"/></td></tr>`
+              const srcs = fv && fv.state === "filled" ? imageUrls(fv) : [];
+              return srcs.length
+                ? `<tr><th>${esc(f.label)}</th><td>${srcs
+                    .map(
+                      (src) =>
+                        `<img src="${esc(src)}" style="max-height:200px;max-width:100%;margin:0 4px 4px 0"/>`,
+                    )
+                    .join("")}</td></tr>`
                 : "";
             }
             const v = displayValue(fv);
