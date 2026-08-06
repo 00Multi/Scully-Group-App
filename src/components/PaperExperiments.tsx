@@ -7,6 +7,7 @@ import {
   useUpdateExperiment,
 } from "@/lib/db";
 import {
+  imageUrls,
   MISSING_VALUE,
   parseFieldInput,
   STATE_LABELS,
@@ -201,38 +202,43 @@ function MultiCell({
   onChange: (v: FieldValue) => void;
 }) {
   const [local, setLocal] = useState(value.value == null ? "" : String(value.value));
-  const [showCalc, setShowCalc] = useState(false);
+  const [calcUrl, setCalcUrl] = useState<string | null>(null);
   useEffect(() => {
     setLocal(value.value == null ? "" : String(value.value));
     // value.state re-syncs the box to empty when it's cleared to N/A.
   }, [value.value, value.state]);
 
   if (field.type === "image") {
-    const url = typeof value.value === "string" && value.value ? value.value : null;
+    const urls = imageUrls(value);
     return (
       <div className="flex items-center gap-1.5">
-        {url ? (
-          <button
-            type="button"
-            onClick={() => setShowCalc(true)}
-            title="Click to measure grain size"
-            className="cursor-zoom-in"
-          >
-            <img
-              src={url}
-              alt={field.label}
-              className="h-8 w-8 rounded border border-rule object-cover bg-white"
-            />
-          </button>
+        {urls.length > 0 ? (
+          <div className="flex items-center gap-1">
+            {urls.map((u, i) => (
+              <button
+                key={`${i}-${u}`}
+                type="button"
+                onClick={() => setCalcUrl(u)}
+                title="Click to measure grain size"
+                className="cursor-zoom-in"
+              >
+                <img
+                  src={u}
+                  alt={`${field.label} ${i + 1}`}
+                  className="h-8 w-8 rounded border border-rule object-cover bg-white"
+                />
+              </button>
+            ))}
+          </div>
         ) : (
           <span className="text-xs text-muted-foreground italic">—</span>
         )}
         <StateSelect value={value} onChange={onChange} />
-        {showCalc && url && (
+        {calcUrl && (
           <GrainSizeCalculator
-            imageUrl={url}
+            imageUrl={calcUrl}
             title={field.label}
-            onClose={() => setShowCalc(false)}
+            onClose={() => setCalcUrl(null)}
           />
         )}
       </div>
