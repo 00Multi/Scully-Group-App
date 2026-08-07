@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { SettingsProvider, useSettings } from "../lib/settings";
+import { HistoryProvider, UndoRedoButtons } from "../lib/history";
 import { useCollapsePasteWhitespace } from "../lib/paste";
 import { Moon, Sun } from "lucide-react";
 
@@ -166,35 +167,38 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <SettingsProvider>
-        <div className="min-h-screen flex flex-col">
-          <header className="border-b border-rule bg-paper/80 backdrop-blur sticky top-0 z-20">
-            <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
-              <Link to="/" className="flex items-center gap-2">
-                <span
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black text-white font-serif italic text-xl leading-none"
-                  aria-hidden
-                >
-                  C
-                </span>
-                <span className="text-2xl font-serif italic">Corrosion</span>
-              </Link>
-              <nav className="flex items-center gap-1">
-                <NavLink to="/">Dashboard</NavLink>
-                <NavLink to="/browse">Browse</NavLink>
-                <NavLink to="/trends">Trends</NavLink>
-                <NavLink to="/bulk">Bulk</NavLink>
-                <NavLink to="/import">Import</NavLink>
-                <NavLink to="/export">Export</NavLink>
-                <ThemeToggle />
-              </nav>
-            </div>
-          </header>
-          <main className="flex-1">
-            <Outlet />
-          </main>
-        </div>
-      </SettingsProvider>
+      <HistoryProvider>
+        <SettingsProvider>
+          <div className="min-h-screen flex flex-col">
+            <header className="border-b border-rule bg-paper/80 backdrop-blur sticky top-0 z-20">
+              <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
+                <Link to="/" className="flex items-center gap-2">
+                  <span
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-black text-white font-serif italic text-xl leading-none"
+                    aria-hidden
+                  >
+                    C
+                  </span>
+                  <span className="text-2xl font-serif italic">Corrosion</span>
+                </Link>
+                <nav className="flex items-center gap-1">
+                  <UndoRedoButtons />
+                  <NavLink to="/">Dashboard</NavLink>
+                  <NavLink to="/browse">Browse</NavLink>
+                  <NavLink to="/trends">Trends</NavLink>
+                  <NavLink to="/bulk">Bulk</NavLink>
+                  <NavLink to="/import">Import</NavLink>
+                  <NavLink to="/export">Export</NavLink>
+                  <ThemeToggle />
+                </nav>
+              </div>
+            </header>
+            <main className="flex-1">
+              <Outlet />
+            </main>
+          </div>
+        </SettingsProvider>
+      </HistoryProvider>
     </QueryClientProvider>
   );
 }
