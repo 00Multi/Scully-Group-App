@@ -17,6 +17,7 @@ import {
   type FieldValue,
 } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
+import { downloadUrl, extFromUrl, imageFilename } from "@/lib/download";
 import { expColor } from "@/lib/expColors";
 import { FieldRow } from "./FieldRow";
 import { ImageFieldRow } from "./ImageFieldRow";
@@ -37,6 +38,7 @@ import {
   CheckCheck,
   Columns3,
   Copy,
+  Download,
   ExternalLink,
   GripVertical,
   Layers,
@@ -56,6 +58,10 @@ const ALL = "__all__";
 type ViewMode = "single" | "multi";
 
 const expName = (e: Experiment, i: number) => e.label?.trim() || `Experiment ${i + 1}`;
+
+// A concise, human-readable paper name for downloaded image filenames.
+const paperNameOf = (p: Paper) =>
+  p.citation_key?.trim() || p.title?.trim() || p.author?.trim() || "Paper";
 
 const fvEqual = (a: FieldValue, b: FieldValue) =>
   a.state === b.state &&
@@ -196,10 +202,14 @@ function MultiCell({
   field,
   value,
   onChange,
+  paperName,
+  experimentName,
 }: {
   field: FieldDef;
   value: FieldValue;
   onChange: (v: FieldValue) => void;
+  paperName?: string;
+  experimentName?: string;
 }) {
   const [local, setLocal] = useState(value.value == null ? "" : String(value.value));
   const [calcUrl, setCalcUrl] = useState<string | null>(null);
@@ -210,24 +220,44 @@ function MultiCell({
 
   if (field.type === "image") {
     const urls = imageUrls(value);
+    const download = (url: string, i: number) =>
+      downloadUrl(
+        url,
+        imageFilename({
+          paper: paperName ?? "",
+          experiment: experimentName ?? "",
+          dataPoint: field.label,
+          ext: extFromUrl(url),
+          index: urls.length > 1 ? i : undefined,
+        }),
+      ).catch(() => {});
     return (
       <div className="flex items-center gap-1.5">
         {urls.length > 0 ? (
           <div className="flex items-center gap-1">
             {urls.map((u, i) => (
-              <button
-                key={`${i}-${u}`}
-                type="button"
-                onClick={() => setCalcUrl(u)}
-                title="Click to measure grain size"
-                className="cursor-zoom-in"
-              >
-                <img
-                  src={u}
-                  alt={`${field.label} ${i + 1}`}
-                  className="h-8 w-8 rounded border border-rule object-cover bg-white"
-                />
-              </button>
+              <div key={`${i}-${u}`} className="group relative">
+                <button
+                  type="button"
+                  onClick={() => setCalcUrl(u)}
+                  title="Click to measure grain size"
+                  className="block cursor-zoom-in"
+                >
+                  <img
+                    src={u}
+                    alt={`${field.label} ${i + 1}`}
+                    className="h-8 w-8 rounded border border-rule object-cover bg-white"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => download(u, i)}
+                  title="Download image"
+                  className="absolute -bottom-1.5 -right-1.5 rounded-full bg-card border border-rule p-0.5 text-muted-foreground opacity-0 shadow transition-opacity hover:text-copper group-hover:opacity-100 focus:opacity-100"
+                >
+                  <Download className="h-3 w-3" />
+                </button>
+              </div>
             ))}
           </div>
         ) : (
@@ -305,6 +335,9 @@ export function PaperExperiments({
     }
   };
   const mode: ViewMode = allowMulti ? view : "single";
+
+  // Paper name used to compose downloaded image filenames (see paperNameOf).
+  const paperName = paperNameOf(paper);
 
   // Editable drafts per experiment, re-synced from the store whenever a save
   // round-trips (updated_at changes) — never mid-typing.
@@ -789,6 +822,7 @@ export function PaperExperiments({
           onToggleChecked={setChecked}
           onMarkRow={markRowBlanks}
           scrollToExp={scrollToExp}
+          paperName={paperName}
         />
       )}
     </div>
@@ -845,6 +879,13 @@ function SingleView({
   useEffect(() => {
     setLabel(active?.label ?? "");
   }, [base, active?.label]);
+
+  // Names for downloaded image filenames.
+  const paperName = paperNameOf(paper);
+  const expNameById = (id: string) => {
+    const i = experiments.findIndex((e) => e.id === id);
+    return i >= 0 ? expName(experiments[i], i) : "";
+  };
 
   return (
     <div className="@container rounded-b-lg border border-t-0 border-rule bg-card">
@@ -942,6 +983,8 @@ function SingleView({
                     value={row.value}
                     paperId={paper.id}
                     experimentId={row.imageExpId}
+                    paperName={paperName}
+                    experimentName={expNameById(row.imageExpId)}
                     onChange={row.commit}
                     onDelete={onDelete}
                     expControl={selector}
@@ -995,6 +1038,7 @@ function MultiView({
   onToggleChecked,
   onMarkRow,
   scrollToExp,
+  paperName,
 }: {
   experiments: Experiment[];
   orderedGroups: { id: string; label: string }[];
@@ -1008,6 +1052,7 @@ function MultiView({
   onToggleChecked: (id: string, checked: boolean) => void;
   onMarkRow: (key: string, state: FieldState) => void;
   scrollToExp: { id: string; nonce: number };
+  paperName: string;
 }) {
   const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1114,6 +1159,7 @@ function MultiView({
               valueOf={valueOf}
               setField={setField}
               onMarkRow={onMarkRow}
+              paperName={paperName}
             />
           ))}
         </tbody>
@@ -1157,6 +1203,7 @@ function ExpGroupRows({
   valueOf,
   setField,
   onMarkRow,
+  paperName,
 }: {
   group: { id: string; label: string };
   fields: FieldDef[];
@@ -1164,6 +1211,7 @@ function ExpGroupRows({
   valueOf: (expId: string, key: string) => FieldValue;
   setField: (expId: string, key: string, v: FieldValue) => void;
   onMarkRow: (key: string, state: FieldState) => void;
+  paperName: string;
 }) {
   if (fields.length === 0) return null;
   return (
@@ -1194,12 +1242,14 @@ function ExpGroupRows({
               />
             </div>
           </td>
-          {experiments.map((e) => (
+          {experiments.map((e, i) => (
             <td key={e.id} className="px-3 py-1.5 align-top border-b border-rule/60">
               <MultiCell
                 field={f}
                 value={valueOf(e.id, f.key)}
                 onChange={(next) => setField(e.id, f.key, next)}
+                paperName={paperName}
+                experimentName={expName(e, i)}
               />
             </td>
           ))}

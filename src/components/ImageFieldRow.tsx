@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import type { FieldDef, FieldState, FieldValue } from "@/lib/fields";
 import { STATE_LABELS, imageUrls, serializeImageUrls } from "@/lib/fields";
 import { useUploadExperimentImage } from "@/lib/db";
+import { downloadUrl, extFromUrl, imageFilename } from "@/lib/download";
 import { useSnip } from "@/lib/snip";
 import { FieldTooltip } from "./FieldTooltip";
 import { StateBadge } from "./StateBadge";
@@ -12,13 +13,25 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ChevronDown, ExternalLink, ImageUp, Loader2, Scissors, Trash2, X } from "lucide-react";
+import {
+  ChevronDown,
+  Download,
+  ExternalLink,
+  ImageUp,
+  Loader2,
+  Scissors,
+  Trash2,
+  X,
+} from "lucide-react";
 
 interface Props {
   field: FieldDef;
   value: FieldValue;
   paperId: string;
   experimentId: string;
+  // Human-readable names used to compose the download filename.
+  paperName?: string;
+  experimentName?: string;
   onChange: (next: FieldValue) => void;
   onDelete?: () => void;
   expControl?: React.ReactNode;
@@ -34,6 +47,8 @@ export function ImageFieldRow({
   value,
   paperId,
   experimentId,
+  paperName,
+  experimentName,
   onChange,
   onDelete,
   expControl,
@@ -48,6 +63,24 @@ export function ImageFieldRow({
 
   const urls = imageUrls(value);
   const requestingThis = snip.active && snip.label === field.label;
+
+  const download = async (url: string, i: number) => {
+    setErr(null);
+    try {
+      await downloadUrl(
+        url,
+        imageFilename({
+          paper: paperName ?? "",
+          experiment: experimentName ?? "",
+          dataPoint: field.label,
+          ext: extFromUrl(url),
+          index: urls.length > 1 ? i : undefined,
+        }),
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Download failed.");
+    }
+  };
 
   // Append a freshly-uploaded image to the list, keeping any existing ones.
   const store = async (blob: Blob, ext = "png") => {
@@ -141,6 +174,13 @@ export function ImageFieldRow({
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
                   </a>
+                  <button
+                    onClick={() => download(u, i)}
+                    title="Download image"
+                    className="absolute -bottom-2 -right-2 rounded-full bg-card border border-rule p-0.5 text-muted-foreground hover:text-copper shadow"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </button>
                   <button
                     onClick={() => removeAt(i)}
                     title="Remove image"
