@@ -156,9 +156,13 @@ function ExperimentSelect({
 function MassStatusMenu({
   label,
   onApply,
+  onFillNeedsCheck,
 }: {
   label: string;
   onApply: (state: FieldState) => void;
+  // When provided, adds an action that flips every "Needs check" cell in scope
+  // to "Filled" (keeping its value). Used per-row in the comparison view.
+  onFillNeedsCheck?: () => void;
 }) {
   return (
     <DropdownMenu>
@@ -172,6 +176,14 @@ function MassStatusMenu({
         <div className="px-2 py-1 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
           {label}
         </div>
+        {onFillNeedsCheck && (
+          <>
+            <DropdownMenuItem onSelect={onFillNeedsCheck}>
+              Set Needs check to Filled
+            </DropdownMenuItem>
+            <div className="my-1 h-px bg-rule/60" />
+          </>
+        )}
         <DropdownMenuItem onSelect={() => onApply("na")}>Set blanks to N/A</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onApply("needs_check")}>
           Set blanks to Needs check
@@ -711,6 +723,15 @@ export function PaperExperiments({
     }
   };
 
+  // Compare view: flip every "Needs check" cell in a data-point row to "Filled",
+  // keeping each cell's value. Cells in other states are left untouched.
+  const fillRowNeedsCheck = (key: string) => {
+    for (const e of experiments) {
+      const v = valueOf(e.id, key);
+      if (v.state === "needs_check") setField(e.id, key, { ...v, state: "filled" });
+    }
+  };
+
   if (experiments.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-rule p-6 text-sm text-muted-foreground italic flex items-center justify-between gap-3">
@@ -733,16 +754,26 @@ export function PaperExperiments({
           {experiments.length} exp{experiments.length === 1 ? "" : "s"}
         </span>
         <div className="flex flex-wrap items-center gap-1.5 flex-1 min-w-0">
-          {/* Neutral "All experiments" chip — the default focus. */}
+          {/* Neutral "All experiments" chip — the default focus. Also the way
+              back to the single "All" view from Compare. */}
           <button
-            onClick={() => onActiveExp(null)}
+            onClick={() => {
+              onActiveExp(null);
+              // In Compare view the "All" tab has no column of its own, so send
+              // the user to the single-view "All experiments" tab.
+              if (mode === "multi") chooseView("single");
+            }}
             className={
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors " +
               (mode === "single" && !baseIsExp
                 ? "border-transparent bg-muted-foreground/15 text-foreground"
                 : "border-rule text-muted-foreground hover:bg-accent")
             }
-            title="Show every experiment's shared values"
+            title={
+              mode === "multi"
+                ? "Switch to the single All-experiments view"
+                : "Show every experiment's shared values"
+            }
           >
             <Layers className="h-3 w-3" /> All
           </button>
@@ -927,6 +958,7 @@ export function PaperExperiments({
           onRename={renameExp}
           onToggleChecked={setChecked}
           onMarkRow={markRowBlanks}
+          onFillRowNeedsCheck={fillRowNeedsCheck}
           scrollToExp={scrollToExp}
           paperName={paperName}
         />
@@ -1143,6 +1175,7 @@ function MultiView({
   onRename,
   onToggleChecked,
   onMarkRow,
+  onFillRowNeedsCheck,
   scrollToExp,
   paperName,
 }: {
@@ -1157,6 +1190,7 @@ function MultiView({
   onRename: (id: string, label: string) => void;
   onToggleChecked: (id: string, checked: boolean) => void;
   onMarkRow: (key: string, state: FieldState) => void;
+  onFillRowNeedsCheck: (key: string) => void;
   scrollToExp: { id: string; nonce: number };
   paperName: string;
 }) {
@@ -1265,6 +1299,7 @@ function MultiView({
               valueOf={valueOf}
               setField={setField}
               onMarkRow={onMarkRow}
+              onFillRowNeedsCheck={onFillRowNeedsCheck}
               paperName={paperName}
             />
           ))}
@@ -1309,6 +1344,7 @@ function ExpGroupRows({
   valueOf,
   setField,
   onMarkRow,
+  onFillRowNeedsCheck,
   paperName,
 }: {
   group: { id: string; label: string };
@@ -1317,6 +1353,7 @@ function ExpGroupRows({
   valueOf: (expId: string, key: string) => FieldValue;
   setField: (expId: string, key: string, v: FieldValue) => void;
   onMarkRow: (key: string, state: FieldState) => void;
+  onFillRowNeedsCheck: (key: string) => void;
   paperName: string;
 }) {
   if (fields.length === 0) return null;
@@ -1345,6 +1382,7 @@ function ExpGroupRows({
               <MassStatusMenu
                 label="Mark blank cells in this row"
                 onApply={(state) => onMarkRow(f.key, state)}
+                onFillNeedsCheck={() => onFillRowNeedsCheck(f.key)}
               />
             </div>
           </td>
