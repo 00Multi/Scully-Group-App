@@ -29,6 +29,7 @@ interface BrowseUIState {
   search: string;
   stateFilter: StateFilter;
   treeCollapsed: boolean;
+  viewTrash: boolean;
 }
 function loadBrowseState(): Partial<BrowseUIState> | null {
   if (typeof window === "undefined") return null;
@@ -154,6 +155,8 @@ function BrowsePage() {
   const [mode, setMode] = useState<ViewMode>("data");
   const [userChoseMode, setUserChoseMode] = useState(false);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
+  // When on, Browse shows trashed papers instead of the active ones.
+  const [viewTrash, setViewTrash] = useState(false);
   // Whether the one-time restore of persisted browse state has run.
   const [restored, setRestored] = useState(false);
 
@@ -185,6 +188,7 @@ function BrowsePage() {
       if (saved.search) setSearch(saved.search);
       if (saved.stateFilter) setStateFilter(saved.stateFilter);
       if (saved.treeCollapsed) setTreeCollapsed(true);
+      if (saved.viewTrash) setViewTrash(true);
     }
     setRestored(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -204,13 +208,19 @@ function BrowsePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paperParam, expParam, papers]);
 
-  // Fall back to the first paper only after restore, and also recover if the
-  // remembered paper no longer exists (e.g. it was deleted).
+  // Papers shown in the tree: active ones normally, trashed ones in trash view.
+  const visiblePapers = useMemo(
+    () => papers.filter((p) => !!p.trashed === viewTrash),
+    [papers, viewTrash],
+  );
+
+  // Fall back to the first visible paper after restore, and recover if the
+  // remembered paper is no longer shown (deleted, trashed, or view switched).
   useEffect(() => {
-    if (!restored || papers.length === 0) return;
-    if (selectedId && papers.some((p) => p.id === selectedId)) return;
-    setSelectedId(papers[0].id);
-  }, [restored, papers, selectedId]);
+    if (!restored) return;
+    if (selectedId && visiblePapers.some((p) => p.id === selectedId)) return;
+    setSelectedId(visiblePapers[0]?.id ?? null);
+  }, [restored, visiblePapers, selectedId]);
 
   // Persist the browse selection/view so it survives leaving and returning.
   useEffect(() => {
@@ -223,6 +233,7 @@ function BrowsePage() {
       search,
       stateFilter,
       treeCollapsed,
+      viewTrash,
     });
   }, [
     restored,
@@ -233,6 +244,7 @@ function BrowsePage() {
     search,
     stateFilter,
     treeCollapsed,
+    viewTrash,
   ]);
 
   const selected = papers.find((p) => p.id === selectedId) ?? null;
@@ -298,7 +310,7 @@ function BrowsePage() {
           </div>
         ) : (
           <BrowseTree
-            papers={papers}
+            papers={visiblePapers}
             experiments={experiments}
             selectedPaperId={selectedId}
             selectedExperimentId={selectedExpId}
@@ -312,6 +324,9 @@ function BrowsePage() {
             stateFilter={stateFilter}
             setStateFilter={setStateFilter}
             onCollapse={() => setTreeCollapsed(true)}
+            viewTrash={viewTrash}
+            setViewTrash={setViewTrash}
+            trashCount={papers.filter((p) => p.trashed).length}
           />
         )}
         <section className="flex-1 min-w-0 flex flex-col h-[calc(100vh-3.5rem)]">

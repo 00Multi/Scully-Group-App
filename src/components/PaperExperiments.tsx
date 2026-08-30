@@ -4,6 +4,8 @@ import {
   pdfPublicUrl,
   useCreateExperiment,
   useDeleteExperiment,
+  useRestorePaper,
+  useTrashPaper,
   useUpdateExperiment,
 } from "@/lib/db";
 import {
@@ -45,6 +47,7 @@ import {
   Layers,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Rows3,
   Trash2,
   X,
@@ -340,6 +343,17 @@ export function PaperExperiments({
   const updateExp = useUpdateExperiment();
   const createExp = useCreateExperiment();
   const deleteExp = useDeleteExperiment();
+  const trashPaper = useTrashPaper();
+  const restorePaper = useRestorePaper();
+
+  // Trash flow: opening the dialog collects a note before confirming.
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashNote, setTrashNote] = useState("");
+  const confirmTrash = () => {
+    trashPaper.mutate({ id: paper.id, note: trashNote.trim() });
+    setTrashOpen(false);
+    setTrashNote("");
+  };
 
   const [view, setView] = useState<ViewMode>("single");
   useEffect(() => {
@@ -877,6 +891,26 @@ export function PaperExperiments({
           <CheckCheck className="h-3.5 w-3.5" />
           {allChecked ? "All done" : "Check all done"}
         </button>
+        {paper.trashed ? (
+          <button
+            onClick={() => restorePaper.mutate(paper.id)}
+            disabled={restorePaper.isPending}
+            title="Restore this paper from the trash"
+            className="inline-flex items-center gap-1 rounded-md border border-state-filled/50 px-2.5 py-1 text-xs text-state-filled hover:bg-state-filled/10 transition-colors shrink-0 disabled:opacity-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Restore
+          </button>
+        ) : (
+          <button
+            onClick={() => setTrashOpen(true)}
+            title="Move this paper to the trash"
+            className="inline-flex items-center gap-1 rounded-md border border-rule px-2.5 py-1 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors shrink-0"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Trash
+          </button>
+        )}
         {paper.pdf_path && (
           <a
             href={pdfPublicUrl(paper.pdf_path) ?? undefined}
@@ -914,6 +948,20 @@ export function PaperExperiments({
           </div>
         )}
       </div>
+
+      {paper.trashed && (
+        <div className="flex items-start gap-2 border-x border-rule bg-destructive/5 px-3 py-2 text-xs text-muted-foreground">
+          <Trash2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          <div className="min-w-0">
+            <span className="font-medium text-destructive">In trash.</span>{" "}
+            {paper.trash_note ? (
+              <span className="italic">“{paper.trash_note}”</span>
+            ) : (
+              <span className="italic opacity-70">No note.</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {mode === "single" ? (
         <SingleView
@@ -962,6 +1010,51 @@ export function PaperExperiments({
           scrollToExp={scrollToExp}
           paperName={paperName}
         />
+      )}
+
+      {trashOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setTrashOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg border border-rule bg-card p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-2 flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-destructive" />
+              <h3 className="text-lg font-serif italic">Move paper to trash</h3>
+            </div>
+            <p className="mb-3 text-xs text-muted-foreground">
+              “{paper.citation_key || paper.title || "This paper"}” will be hidden from Browse until
+              you view the trash. Add a note about why you're trashing it.
+            </p>
+            <textarea
+              autoFocus
+              value={trashNote}
+              onChange={(e) => setTrashNote(e.target.value)}
+              placeholder="e.g. Duplicate of Smith 2021 / out of scope / superseded…"
+              rows={3}
+              className="w-full resize-y rounded border border-input bg-background px-2 py-1.5 text-sm focus:border-primary focus:outline-none"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setTrashOpen(false)}
+                className="rounded-md border border-rule px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmTrash}
+                disabled={trashPaper.isPending}
+                className="inline-flex items-center gap-1 rounded-md bg-destructive px-3 py-1.5 text-xs text-destructive-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Move to trash
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

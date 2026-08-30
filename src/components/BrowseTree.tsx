@@ -6,6 +6,7 @@ import {
   PanelLeftClose,
   Plus,
   Search,
+  Trash2,
 } from "lucide-react";
 import type { Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
@@ -61,6 +62,9 @@ interface Props {
   stateFilter: StateFilter;
   setStateFilter: (v: StateFilter) => void;
   onCollapse?: () => void;
+  viewTrash: boolean;
+  setViewTrash: (v: boolean) => void;
+  trashCount: number;
 }
 
 function alloyTypeOf(e: Experiment): string {
@@ -100,6 +104,9 @@ export function BrowseTree({
   stateFilter,
   setStateFilter,
   onCollapse,
+  viewTrash,
+  setViewTrash,
+  trashCount,
 }: Props) {
   const [openPapers, setOpenPapers] = useState<Record<string, boolean>>({});
   const [sortBy, setSortBy] = useState<SortMode>("default");
@@ -258,6 +265,32 @@ export function BrowseTree({
             <option value="added_old">Sort: oldest added</option>
           </select>
         </div>
+        <div className="inline-flex w-full overflow-hidden rounded-md border border-rule text-xs">
+          <button
+            onClick={() => setViewTrash(false)}
+            className={
+              "flex-1 px-2 py-1.5 transition-colors " +
+              (!viewTrash
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent")
+            }
+          >
+            Active
+          </button>
+          <button
+            onClick={() => setViewTrash(true)}
+            title="Show papers moved to the trash"
+            className={
+              "flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 transition-colors " +
+              (viewTrash
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent")
+            }
+          >
+            <Trash2 className="h-3 w-3" />
+            Trash{trashCount > 0 ? ` (${trashCount})` : ""}
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-rule/60">
@@ -273,20 +306,25 @@ export function BrowseTree({
             </button>
           )}
           <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono truncate">
+            {viewTrash ? "In trash · " : ""}
             {visiblePapers.length} paper{visiblePapers.length === 1 ? "" : "s"}
           </span>
         </div>
-        <button
-          onClick={() => createPaper.mutate({ category_id: null })}
-          className="inline-flex items-center gap-1 text-xs text-copper hover:underline shrink-0"
-        >
-          <Plus className="h-3 w-3" /> New paper
-        </button>
+        {!viewTrash && (
+          <button
+            onClick={() => createPaper.mutate({ category_id: null })}
+            className="inline-flex items-center gap-1 text-xs text-copper hover:underline shrink-0"
+          >
+            <Plus className="h-3 w-3" /> New paper
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto py-1">
         {visiblePapers.length === 0 && (
-          <p className="px-3 py-4 text-xs text-muted-foreground italic">No papers match.</p>
+          <p className="px-3 py-4 text-xs text-muted-foreground italic">
+            {viewTrash ? "Trash is empty." : "No papers match."}
+          </p>
         )}
         {visiblePapers.map((p) => {
           const exps = shownExps(p);
