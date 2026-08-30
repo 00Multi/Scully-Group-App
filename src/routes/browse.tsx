@@ -16,6 +16,8 @@ type ViewMode = "data" | "split" | "paper";
 interface BrowseSearch {
   paper?: string;
   exp?: string;
+  // Force a view mode when following a shared link (e.g. ?view=data).
+  view?: ViewMode;
 }
 
 // The Browse tab's selection/view is remembered across tab switches (Browse is
@@ -53,6 +55,10 @@ export const Route = createFileRoute("/browse")({
   validateSearch: (search: Record<string, unknown>): BrowseSearch => ({
     paper: typeof search.paper === "string" ? search.paper : undefined,
     exp: typeof search.exp === "string" ? search.exp : undefined,
+    view:
+      search.view === "data" || search.view === "split" || search.view === "paper"
+        ? search.view
+        : undefined,
   }),
   head: () => ({
     meta: [
@@ -143,7 +149,7 @@ function ViewToggle({ mode, setMode }: { mode: ViewMode; setMode: (m: ViewMode) 
 }
 
 function BrowsePage() {
-  const { paper: paperParam, exp: expParam } = Route.useSearch();
+  const { paper: paperParam, exp: expParam, view: viewParam } = Route.useSearch();
   const navigate = Route.useNavigate();
   const { data: papers = [] } = usePapers();
   const { data: experiments = [] } = useExperiments();
@@ -194,19 +200,28 @@ function BrowsePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Apply an incoming deep-link (?paper=&exp=) once the data has loaded.
+  // Apply an incoming deep-link (?paper=&exp=&view=) once the data has loaded.
   useEffect(() => {
-    if (paperParam && papers.some((p) => p.id === paperParam)) {
-      setSelectedId(paperParam);
+    const target = paperParam ? papers.find((p) => p.id === paperParam) : undefined;
+    if (target) {
+      // Make sure the paper is in the shown set (a shared link may point at a
+      // trashed paper).
+      setViewTrash(!!target.trashed);
+      setSelectedId(target.id);
       if (expParam) {
         setSelectedExpId(expParam);
         pendingScrollExp.current = expParam;
+      }
+      // Honour an explicit view from the link (e.g. the "Copy data link" button).
+      if (viewParam) {
+        setUserChoseMode(true);
+        setMode(viewParam);
       }
       // Clear the params so a later manual selection isn't overridden.
       navigate({ search: {}, replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paperParam, expParam, papers]);
+  }, [paperParam, expParam, viewParam, papers]);
 
   // Papers shown in the tree: active ones normally, trashed ones in trash view.
   const visiblePapers = useMemo(
