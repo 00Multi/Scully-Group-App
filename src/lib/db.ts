@@ -28,6 +28,10 @@ export interface Paper {
   auto_filled: Record<string, boolean>;
   // Field keys the user tagged as the variables studied in this paper.
   variables: string[];
+  // Soft-delete: trashed papers are hidden from Browse unless "View trash" is on.
+  trashed: boolean;
+  trash_note: string;
+  trashed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -52,6 +56,9 @@ function normalizePaper(row: any): Paper {
     meta: row?.meta ?? {},
     auto_filled: row?.auto_filled ?? {},
     variables: Array.isArray(row?.variables) ? row.variables : [],
+    trashed: row?.trashed ?? false,
+    trash_note: row?.trash_note ?? "",
+    trashed_at: row?.trashed_at ?? null,
   } as Paper;
 }
 
@@ -248,6 +255,40 @@ export function useUpdatePaper() {
       const { error } = await supabase
         .from("papers")
         .update(patch as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["papers"] }),
+  });
+}
+
+// Move a paper to the trash (soft delete) with an explanatory note, or restore
+// it. Trashed papers are hidden from Browse unless "View trash" is selected.
+export function useTrashPaper() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, note }: { id: string; note: string }) => {
+      const { error } = await supabase
+        .from("papers")
+        .update({
+          trashed: true,
+          trash_note: note,
+          trashed_at: new Date().toISOString(),
+        } as any)
+        .eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["papers"] }),
+  });
+}
+
+export function useRestorePaper() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from("papers")
+        .update({ trashed: false, trash_note: "", trashed_at: null } as any)
         .eq("id", id);
       if (error) throw error;
     },
