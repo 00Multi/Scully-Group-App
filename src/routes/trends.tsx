@@ -101,7 +101,13 @@ function TrendsPage() {
             <h2 className="text-2xl font-serif italic mb-3">{section.label}</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {section.trends.map((t) => (
-                <TrendChart key={t.id} title={t.title} data={t.data} mounted={mounted} />
+                <TrendChart
+                  key={t.id}
+                  title={t.title}
+                  data={t.data}
+                  splitData={t.splitData}
+                  mounted={mounted}
+                />
               ))}
             </div>
           </section>

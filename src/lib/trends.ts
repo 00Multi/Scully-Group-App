@@ -29,6 +29,11 @@ export interface TrendSpec {
   id: string;
   title: string;
   data: Bucket[];
+  // Alternative buckets where each cell's comma/semicolon-separated values are
+  // counted separately (e.g. "Cr, Mo, Ni" → Cr, Mo, Ni). Present only for
+  // categorical fields where splitting actually changes the result, so the
+  // chart can offer a "split" toggle.
+  splitData?: Bucket[];
 }
 
 export interface TrendSection {
@@ -45,22 +50,41 @@ function topWithOther(entries: [string, number][], topN: number): Bucket[] {
   return top;
 }
 
+// Split a cell that lists several values ("Cr, Mo, Ni" or "UVA; ORNL") into its
+// individual entries.
+export function splitCellValues(raw: string): string[] {
+  return raw
+    .split(/[,;]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 // Count filled / needs-check values of an experiment field, grouping the long
-// tail into "Other" so the chart stays legible.
+// tail into "Other" so the chart stays legible. When `split` is set, a cell
+// listing several comma/semicolon-separated values is counted once per value.
 export function categoricalDistribution(
   experiments: Experiment[],
   key: string,
   topN = 8,
+  split = false,
 ): Bucket[] {
   const m = new Map<string, number>();
   for (const e of experiments) {
     const v = e.values?.[key];
     if (!v || (v.state !== "filled" && v.state !== "needs_check")) continue;
     if (v.value == null || String(v.value).trim() === "") continue;
-    const label = String(v.value).trim();
-    m.set(label, (m.get(label) ?? 0) + 1);
+    const raw = String(v.value).trim();
+    const labels = split ? splitCellValues(raw) : [raw];
+    for (const label of labels) m.set(label, (m.get(label) ?? 0) + 1);
   }
   return topWithOther(Array.from(m.entries()), topN);
+}
+
+// Whether two bucket lists are identical (same labels and counts in order).
+function bucketsEqual(a: Bucket[], b: Bucket[]): boolean {
+  return (
+    a.length === b.length && a.every((x, i) => x.label === b[i].label && x.count === b[i].count)
+  );
 }
 
 function niceStep(range: number, targetBins: number): number {
@@ -283,11 +307,17 @@ export function buildTrendSections(
     const trends: TrendSpec[] = [];
     for (const f of fieldDefs) {
       if (f.group !== g.id || f.type === "image") continue;
-      const data =
-        f.type === "number"
-          ? numericHistogram(experiments, f.key)
-          : categoricalDistribution(experiments, f.key);
-      if (data.length > 0) trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data });
+      if (f.type === "number") {
+        const data = numericHistogram(experiments, f.key);
+        if (data.length > 0) trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data });
+        continue;
+      }
+      const data = categoricalDistribution(experiments, f.key);
+      if (data.length === 0) continue;
+      // Offer a "split" view only when some cell actually held several values.
+      const split = categoricalDistribution(experiments, f.key, 8, true);
+      const splitData = split.length && !bucketsEqual(split, data) ? split : undefined;
+      trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data, splitData });
     }
     if (trends.length) sections.push({ id: g.id, label: g.label, trends });
   }
