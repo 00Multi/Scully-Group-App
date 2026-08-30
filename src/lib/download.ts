@@ -57,3 +57,18 @@ export async function downloadUrl(url: string, filename: string): Promise<void> 
     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   }
 }
+
+// Save an in-memory blob (e.g. a rendered chart PNG) under `filename`.
+export function downloadBlob(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  }
+}
