@@ -233,9 +233,15 @@ function BrowsePage() {
   // remembered paper is no longer shown (deleted, trashed, or view switched).
   useEffect(() => {
     if (!restored) return;
+    // A pending deep-link (?paper=…) owns the selection — don't clobber it with
+    // the first paper. Both effects run in the same commit when the data loads
+    // and read the same stale selectedId, so without this guard the fallback
+    // would overwrite the linked paper. The deep-link effect clears the param
+    // once applied, after which normal fallback resumes.
+    if (paperParam && papers.some((p) => p.id === paperParam)) return;
     if (selectedId && visiblePapers.some((p) => p.id === selectedId)) return;
     setSelectedId(visiblePapers[0]?.id ?? null);
-  }, [restored, visiblePapers, selectedId]);
+  }, [restored, visiblePapers, selectedId, paperParam, papers]);
 
   // Persist the browse selection/view so it survives leaving and returning.
   useEffect(() => {
