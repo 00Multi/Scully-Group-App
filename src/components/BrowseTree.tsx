@@ -3,6 +3,7 @@ import {
   ArrowDownWideNarrow,
   Check,
   ChevronRight,
+  Link2,
   PanelLeftClose,
   Plus,
   Search,
@@ -112,8 +113,23 @@ export function BrowseTree({
   const [sortBy, setSortBy] = useState<SortMode>("default");
   const [alloyFilter, setAlloyFilter] = useState<string>("all");
   const [restored, setRestored] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const createPaper = useCreatePaper();
   const fieldDefs = useFieldDefs();
+
+  // Copy a shareable link that opens this paper straight in the data-only view.
+  const copyDataLink = async (id: string) => {
+    if (typeof window === "undefined") return;
+    const url = `${window.location.origin}/browse?paper=${encodeURIComponent(id)}&view=data`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    } catch {
+      // Clipboard blocked — fall back to a prompt the user can copy from.
+      window.prompt("Copy this link:", url);
+    }
+  };
 
   // Restore the persisted tree state once, client-side.
   useEffect(() => {
@@ -370,6 +386,23 @@ export function BrowseTree({
                   <div className="text-[10px] text-muted-foreground font-mono">
                     {exps.length} exp{exps.length === 1 ? "" : "s"}
                   </div>
+                </button>
+                <button
+                  onClick={() => copyDataLink(p.id)}
+                  title="Copy a link to this paper's data view"
+                  aria-label="Copy link to data view"
+                  className={
+                    "shrink-0 self-center mr-1 p-1 rounded transition-colors focus:opacity-100 " +
+                    (copiedId === p.id
+                      ? "text-state-filled opacity-100"
+                      : "text-muted-foreground hover:text-copper opacity-0 group-hover:opacity-100")
+                  }
+                >
+                  {copiedId === p.id ? (
+                    <Check className="h-3.5 w-3.5" />
+                  ) : (
+                    <Link2 className="h-3.5 w-3.5" />
+                  )}
                 </button>
               </div>
               {paperOpen && exps.length > 0 && (
