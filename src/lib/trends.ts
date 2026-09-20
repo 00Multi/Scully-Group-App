@@ -324,3 +324,131 @@ export function buildTrendSections(
 
   return sections;
 }
+
+// ---------- Relationship explorer (two fields plotted against each other) ----------
+
+export interface RelationshipPoint {
+  label: string; // x group label (a value, or a numeric bin range)
+  value: number; // aggregated y for the group (mean, or count)
+  n: number; // experiments in the group
+  sort: number; // ordering key (numeric bin start, or descending-count rank)
+}
+
+export interface RelationshipResult {
+  points: RelationshipPoint[];
+  numericX: boolean;
+  numericY: boolean;
+  // How y was aggregated per x group, for the axis/tooltip label.
+  yLabel: string;
+  total: number; // total experiments with both values present
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+function readFieldValue(e: Experiment, key: string): string | number | null {
+  const v = e.values?.[key];
+  if (!v || (v.state !== "filled" && v.state !== "needs_check")) return null;
+  if (v.value == null || String(v.value).trim() === "") return null;
+  return v.value;
+}
+
+// Plot two data-point fields against each other: group experiments by the X
+// field (numeric fields are binned, categorical fields grouped by value) and
+// aggregate the Y field per group — the mean when Y is numeric, otherwise the
+// count of experiments. Only experiments that have BOTH values are considered.
+// Share of values that parse as finite numbers.
+function numericFraction(vals: (string | number)[]): number {
+  if (vals.length === 0) return 0;
+  return vals.filter((v) => Number.isFinite(Number(v))).length / vals.length;
+}
+
+export function relationshipData(
+  experiments: Experiment[],
+  xField: FieldDef,
+  yField: FieldDef,
+  topN = 12,
+): RelationshipResult {
+  // Only experiments that have BOTH values contribute.
+  const raw: { x: string | number; y: string | number }[] = [];
+  for (const e of experiments) {
+    const xv = readFieldValue(e, xField.key);
+    const yv = readFieldValue(e, yField.key);
+    if (xv === null || yv === null) continue;
+    raw.push({ x: xv, y: yv });
+  }
+
+  // Treat an axis as numeric only when its field is typed number AND the actual
+  // values really are numbers — a field can be declared "number" yet hold
+  // categorical text (e.g. an alloy family), which should bin as categories.
+  const numericX = xField.type === "number" && numericFraction(raw.map((r) => r.x)) >= 0.8;
+  const numericY = yField.type === "number" && numericFraction(raw.map((r) => r.y)) >= 0.8;
+  const yLabel = numericY ? `avg ${yField.label}` : "count";
+
+  type Pair = { xNum: number | null; xStr: string; yNum: number | null };
+  const pairs: Pair[] = raw.map((r) => {
+    const xn = Number(r.x);
+    const yn = Number(r.y);
+    return {
+      xNum: numericX && Number.isFinite(xn) ? xn : null,
+      xStr: String(r.x).trim(),
+      yNum: numericY && Number.isFinite(yn) ? yn : null,
+    };
+  });
+
+  const empty: RelationshipResult = { points: [], numericX, numericY, yLabel, total: pairs.length };
+  if (pairs.length === 0) return empty;
+
+  // Aggregate a group's y values: mean when numeric, else the experiment count.
+  const aggregate = (group: Pair[]): number => {
+    if (!numericY) return group.length;
+    const ys = group.map((p) => p.yNum).filter((y): y is number => y != null);
+    if (ys.length === 0) return 0;
+    return round2(ys.reduce((s, y) => s + y, 0) / ys.length);
+  };
+
+  if (numericX) {
+    const xs = pairs.map((p) => p.xNum).filter((n): n is number => n != null);
+    if (xs.length === 0) return empty;
+    const min = Math.min(...xs);
+    const max = Math.max(...xs);
+    if (min === max) {
+      return {
+        points: [{ label: fmt(min), value: aggregate(pairs), n: pairs.length, sort: min }],
+        numericX,
+        numericY,
+        yLabel,
+        total: pairs.length,
+      };
+    }
+    const step = niceStep(max - min, 8);
+    const groups = new Map<number, Pair[]>();
+    for (const p of pairs) {
+      if (p.xNum == null) continue;
+      const bin = Math.floor(p.xNum / step) * step;
+      (groups.get(bin) ?? groups.set(bin, []).get(bin)!).push(p);
+    }
+    const points = Array.from(groups.entries())
+      .sort((a, b) => a[0] - b[0])
+      .map(([bin, group]) => ({
+        label: `${fmt(bin)}–${fmt(bin + step)}`,
+        value: aggregate(group),
+        n: group.length,
+        sort: bin,
+      }));
+    return { points, numericX, numericY, yLabel, total: pairs.length };
+  }
+
+  // Categorical X: one group per distinct value, keep the top N by sample size.
+  const groups = new Map<string, Pair[]>();
+  for (const p of pairs) {
+    (groups.get(p.xStr) ?? groups.set(p.xStr, []).get(p.xStr)!).push(p);
+  }
+  const points = Array.from(groups.entries())
+    .map(([label, group]) => ({ label, value: aggregate(group), n: group.length }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
+    .slice(0, topN)
+    .map((p, i) => ({ ...p, sort: i }));
+  return { points, numericX, numericY, yLabel, total: pairs.length };
+}
