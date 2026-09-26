@@ -48,7 +48,8 @@ function PlotPage() {
           Pick an X and a Y data point; every experiment that reports both is drawn as one point.
           Add constraints to focus a subset (e.g. Salt = FLiNaK), or add more series to compare
           slices on the same axes. Colours, shapes, axis names, limits, and the grid are all yours
-          to change — click a point to delete it, and undo (⌘/Ctrl+Z) reverses mistakes.
+          to change — click a point to delete it or open that experiment in Browse, and undo
+          (⌘/Ctrl+Z) reverses mistakes.
         </p>
       </div>
 
