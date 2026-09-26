@@ -3,7 +3,6 @@ import {
   ArrowDownWideNarrow,
   Check,
   ChevronRight,
-  Group as GroupIcon,
   Link2,
   PanelLeftClose,
   Plus,
@@ -14,13 +13,6 @@ import type { Experiment, Paper } from "@/lib/db";
 import { useCreatePaper } from "@/lib/db";
 import type { FieldState } from "@/lib/fields";
 import { useFieldDefs } from "@/lib/settings";
-import {
-  paperGroupIds,
-  setPaperInGroup,
-  useInstitutionGroups,
-  useSaveInstitutionGroups,
-} from "@/lib/institutionGroups";
-import { flagEmoji } from "@/lib/countries";
 
 export type StateFilter = "any" | FieldState;
 export type SortMode =
@@ -124,18 +116,6 @@ export function BrowseTree({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const createPaper = useCreatePaper();
   const fieldDefs = useFieldDefs();
-
-  // Institution groups (created on Trends) shown as drop targets: drag a paper
-  // onto one to add it to that group.
-  const { data: groups = [] } = useInstitutionGroups();
-  const saveGroups = useSaveInstitutionGroups();
-  const [dragPaper, setDragPaper] = useState<string | null>(null);
-  const [overGroup, setOverGroup] = useState<string | null>(null);
-  const assignToGroup = (groupId: string, paperId: string) => {
-    if (!paperGroupIds(groups, paperId).has(groupId)) {
-      saveGroups.mutate(setPaperInGroup(groups, groupId, paperId, true));
-    }
-  };
 
   // Copy a shareable link that opens this paper straight in the data-only view.
   const copyDataLink = async (id: string) => {
@@ -372,16 +352,9 @@ export function BrowseTree({
           return (
             <div key={p.id} className="mb-0.5">
               <div
-                draggable
-                onDragStart={(ev) => {
-                  setDragPaper(p.id);
-                  ev.dataTransfer.effectAllowed = "copy";
-                  ev.dataTransfer.setData("text/plain", p.id);
-                }}
-                onDragEnd={() => setDragPaper(null)}
                 className={`group flex items-start rounded-sm mx-1 ${
                   active ? "bg-accent text-foreground" : "text-ink-muted hover:bg-accent/70"
-                } ${dragPaper === p.id ? "opacity-40" : ""}`}
+                }`}
               >
                 <button
                   onClick={() => setOpenPapers((s) => ({ ...s, [p.id]: !paperOpen }))}
@@ -466,53 +439,6 @@ export function BrowseTree({
           );
         })}
       </div>
-
-      {groups.length > 0 && (
-        <div className="border-t border-rule/60 p-2">
-          <div className="px-1 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
-            Groups{dragPaper ? " · drop to add" : ""}
-          </div>
-          <div className="space-y-0.5">
-            {groups.map((g) => {
-              const over = overGroup === g.id;
-              return (
-                <div
-                  key={g.id}
-                  onDragOver={(ev) => {
-                    if (!dragPaper) return;
-                    ev.preventDefault();
-                    if (overGroup !== g.id) setOverGroup(g.id);
-                  }}
-                  onDragLeave={() => setOverGroup((o) => (o === g.id ? null : o))}
-                  onDrop={(ev) => {
-                    ev.preventDefault();
-                    const pid = dragPaper || ev.dataTransfer.getData("text/plain");
-                    if (pid) assignToGroup(g.id, pid);
-                    setOverGroup(null);
-                    setDragPaper(null);
-                  }}
-                  title={`Drop a paper here to add it to ${g.shorthand}`}
-                  className={
-                    "flex items-center gap-1.5 rounded border px-2 py-1 text-xs transition-colors " +
-                    (over
-                      ? "border-copper bg-copper/10 text-copper"
-                      : dragPaper
-                        ? "border-dashed border-rule text-muted-foreground"
-                        : "border-transparent text-muted-foreground")
-                  }
-                >
-                  <GroupIcon className="h-3 w-3 shrink-0" />
-                  {g.country?.code && <span aria-hidden>{flagEmoji(g.country.code)}</span>}
-                  <span className="truncate flex-1">{g.shorthand}</span>
-                  <span className="font-mono text-[10px] opacity-70">
-                    {(g.members?.length ?? 0) + (g.papers?.length ?? 0)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
     </aside>
   );
 }
