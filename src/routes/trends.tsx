@@ -4,7 +4,6 @@ import { usePapers, useExperiments } from "@/lib/db";
 import { useSettings } from "@/lib/settings";
 import { TrendChart } from "@/components/TrendChart";
 import { TrendsInstitutions } from "@/components/TrendsInstitutions";
-import { RelationshipExplorer } from "@/components/RelationshipExplorer";
 import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { buildTrendSections } from "@/lib/trends";
 import { PALETTES, type PaletteName } from "@/lib/palettes";
@@ -129,17 +128,6 @@ function TrendsPage() {
         <div className="rounded-lg border border-dashed border-rule p-10 text-center text-sm text-muted-foreground italic">
           Nothing matches “{query}”.
         </div>
-      )}
-
-      {experiments.length > 0 && (
-        <CollapsibleSection id="relationship" title="Explore a relationship">
-          <p className="mb-3 text-sm text-muted-foreground max-w-2xl">
-            Pick two data points and plot one against the other. Numeric X fields are binned; the Y
-            value is averaged per group (or counted when it isn't numeric). Switch a numeric plot to
-            a line, and download any view as a PNG.
-          </p>
-          <RelationshipExplorer experiments={experiments} fieldDefs={fieldDefs} mounted={mounted} />
-        </CollapsibleSection>
       )}
 
       <TrendsInstitutions papers={papers} query={query} />

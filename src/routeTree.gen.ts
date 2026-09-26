@@ -14,6 +14,7 @@ import { Route as BrowseRouteImport } from './routes/browse'
 import { Route as BulkRouteImport } from './routes/bulk'
 import { Route as ExportRouteImport } from './routes/export'
 import { Route as ImportRouteImport } from './routes/import'
+import { Route as PlotRouteImport } from './routes/plot'
 import { Route as SitemapDotxmlRouteImport } from './routes/sitemap[.]xml'
 import { Route as TrendsRouteImport } from './routes/trends'
 import { Route as ApiKeepAliveRouteImport } from './routes/api/keep-alive'
@@ -43,6 +44,11 @@ const ImportRoute = ImportRouteImport.update({
   path: '/import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlotRoute = PlotRouteImport.update({
+  id: '/plot',
+  path: '/plot',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SitemapDotxmlRoute = SitemapDotxmlRouteImport.update({
   id: '/sitemap.xml',
   path: '/sitemap.xml',
@@ -65,6 +71,7 @@ export interface FileRoutesByFullPath {
   '/bulk': typeof BulkRoute
   '/export': typeof ExportRoute
   '/import': typeof ImportRoute
+  '/plot': typeof PlotRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/trends': typeof TrendsRoute
   '/api/keep-alive': typeof ApiKeepAliveRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByTo {
   '/bulk': typeof BulkRoute
   '/export': typeof ExportRoute
   '/import': typeof ImportRoute
+  '/plot': typeof PlotRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/trends': typeof TrendsRoute
   '/api/keep-alive': typeof ApiKeepAliveRoute
@@ -86,6 +94,7 @@ export interface FileRoutesById {
   '/bulk': typeof BulkRoute
   '/export': typeof ExportRoute
   '/import': typeof ImportRoute
+  '/plot': typeof PlotRoute
   '/sitemap.xml': typeof SitemapDotxmlRoute
   '/trends': typeof TrendsRoute
   '/api/keep-alive': typeof ApiKeepAliveRoute
@@ -98,6 +107,7 @@ export interface FileRouteTypes {
     | '/bulk'
     | '/export'
     | '/import'
+    | '/plot'
     | '/sitemap.xml'
     | '/trends'
     | '/api/keep-alive'
@@ -108,6 +118,7 @@ export interface FileRouteTypes {
     | '/bulk'
     | '/export'
     | '/import'
+    | '/plot'
     | '/sitemap.xml'
     | '/trends'
     | '/api/keep-alive'
@@ -118,6 +129,7 @@ export interface FileRouteTypes {
     | '/bulk'
     | '/export'
     | '/import'
+    | '/plot'
     | '/sitemap.xml'
     | '/trends'
     | '/api/keep-alive'
@@ -129,6 +141,7 @@ export interface RootRouteChildren {
   BulkRoute: typeof BulkRoute
   ExportRoute: typeof ExportRoute
   ImportRoute: typeof ImportRoute
+  PlotRoute: typeof PlotRoute
   SitemapDotxmlRoute: typeof SitemapDotxmlRoute
   TrendsRoute: typeof TrendsRoute
   ApiKeepAliveRoute: typeof ApiKeepAliveRoute
@@ -171,6 +184,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/plot': {
+      id: '/plot'
+      path: '/plot'
+      fullPath: '/plot'
+      preLoaderRoute: typeof PlotRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/sitemap.xml': {
       id: '/sitemap.xml'
       path: '/sitemap.xml'
@@ -201,6 +221,7 @@ const rootRouteChildren: RootRouteChildren = {
   BulkRoute: BulkRoute,
   ExportRoute: ExportRoute,
   ImportRoute: ImportRoute,
+  PlotRoute: PlotRoute,
   SitemapDotxmlRoute: SitemapDotxmlRoute,
   TrendsRoute: TrendsRoute,
   ApiKeepAliveRoute: ApiKeepAliveRoute,
