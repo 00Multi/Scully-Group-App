@@ -60,7 +60,14 @@ export async function captureCardPng(
   card: HTMLElement,
   opts: { title?: string; scale?: number } = {},
 ): Promise<Blob> {
-  const svg = card.querySelector("svg");
+  // Grab the Recharts chart specifically — NOT the first <svg>, which would be a
+  // lucide toolbar icon (copy/download/toggle buttons render before the chart in
+  // the DOM). The chart <svg> carries the `recharts-surface` class and contains
+  // the plot plus its axes and axis titles.
+  const svg =
+    card.querySelector("svg.recharts-surface") ??
+    card.querySelector(".recharts-wrapper svg") ??
+    card.querySelector("svg");
   if (!svg) throw new Error("The chart isn't ready yet.");
   const scale = opts.scale ?? 2;
   const rect = svg.getBoundingClientRect();
