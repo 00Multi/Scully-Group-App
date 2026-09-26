@@ -1,4 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Bar as RBar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip as RTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import type { Paper } from "@/lib/db";
 import {
   countryCounts,
@@ -14,7 +25,18 @@ import {
 import { flagEmoji } from "@/lib/countries";
 import { CountryCombobox } from "./CountryCombobox";
 import { InstitutionLogo } from "./InstitutionLogo";
-import { Check, ChevronRight, Group, Ungroup, X } from "lucide-react";
+import { CollapsibleSection } from "./CollapsibleSection";
+import {
+  BarChart3,
+  Check,
+  ChevronRight,
+  Group,
+  LineChart as LineIcon,
+  Ungroup,
+  X,
+} from "lucide-react";
+
+const COPPER = "#b87333";
 
 const keyOf = (i: InstitutionCount) => (i.groupId ? `g:${i.groupId}` : `i:${i.name.toLowerCase()}`);
 const newId = () =>
@@ -26,6 +48,81 @@ function Bar({ count, max }: { count: number; max: number }) {
   return (
     <div className="mt-1 h-1 rounded-full bg-muted overflow-hidden">
       <div className="h-full bg-copper" style={{ width: `${max ? (count / max) * 100 : 0}%` }} />
+    </div>
+  );
+}
+
+// Papers-per-country as a line (default) or bar chart.
+function CountryChart({
+  data,
+  mode,
+  mounted,
+}: {
+  data: { label: string; count: number }[];
+  mode: "line" | "bar";
+  mounted: boolean;
+}) {
+  const maxChars = data.reduce((m, d) => Math.max(m, d.label.length), 1);
+  const rotate = data.length > 4 || maxChars > 6;
+  const height = 200 + (rotate ? 40 : 0);
+  const xAxis = (
+    <XAxis
+      dataKey="label"
+      tick={{ fontSize: 10, fill: "currentColor" }}
+      interval={mode === "line" ? "preserveStartEnd" : 0}
+      angle={rotate ? -35 : 0}
+      textAnchor={rotate ? "end" : "middle"}
+      height={rotate ? 60 : 22}
+      tickMargin={6}
+      stroke="currentColor"
+      className="text-muted-foreground"
+    />
+  );
+  const yAxis = (
+    <YAxis
+      allowDecimals={false}
+      tick={{ fontSize: 10, fill: "currentColor" }}
+      stroke="currentColor"
+      className="text-muted-foreground"
+      width={36}
+      tickMargin={4}
+    />
+  );
+  return (
+    <div className="mb-3 rounded-lg border border-rule bg-card p-4" style={{ height }}>
+      {mounted && (
+        <ResponsiveContainer width="100%" height="100%">
+          {mode === "line" ? (
+            <LineChart data={data} margin={{ top: 6, right: 10, left: 4, bottom: 4 }}>
+              <CartesianGrid stroke="currentColor" className="text-rule/40" vertical={false} />
+              {xAxis}
+              {yAxis}
+              <RTooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                labelStyle={{ fontWeight: 600 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="count"
+                stroke={COPPER}
+                strokeWidth={2}
+                dot={{ r: 2, fill: COPPER }}
+              />
+            </LineChart>
+          ) : (
+            <BarChart data={data} margin={{ top: 6, right: 10, left: 4, bottom: 4 }}>
+              {xAxis}
+              {yAxis}
+              <RTooltip
+                cursor={{ fill: "rgba(184,115,51,0.08)" }}
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                labelStyle={{ fontWeight: 600 }}
+              />
+              <RBar dataKey="count" fill={COPPER} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          )}
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }
@@ -92,12 +189,44 @@ export function TrendsInstitutions({ papers, query }: { papers: Paper[]; query: 
 
   // Country drill-down.
   const [openCountry, setOpenCountry] = useState<string | null>(null);
+  const [countryMode, setCountryMode] = useState<"line" | "bar">("line");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const countryChartData = useMemo(
+    () => shownCountries.map((c) => ({ label: c.name, count: c.count })),
+    [shownCountries],
+  );
+
+  const countryModeToggle = (
+    <div className="inline-flex overflow-hidden rounded-md border border-rule">
+      {(
+        [
+          ["line", LineIcon],
+          ["bar", BarChart3],
+        ] as ["line" | "bar", typeof LineIcon][]
+      ).map(([m, Icon]) => (
+        <button
+          key={m}
+          onClick={() => setCountryMode(m)}
+          title={m === "line" ? "Line" : "Bars"}
+          className={
+            "inline-flex items-center gap-1 px-2 py-1 text-xs transition-colors " +
+            (countryMode === m
+              ? "bg-primary text-primary-foreground"
+              : "text-muted-foreground hover:bg-accent")
+          }
+        >
+          <Icon className="h-3 w-3" />
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <>
       {shownCountries.length > 0 && (
-        <section className="mb-10">
-          <h2 className="text-2xl font-serif italic mb-3">Countries</h2>
+        <CollapsibleSection id="countries" title="Countries" right={countryModeToggle}>
+          <CountryChart data={countryChartData} mode={countryMode} mounted={mounted} />
           <div className="rounded-lg border border-rule bg-card divide-y divide-rule/60">
             {shownCountries.map((c) => {
               const open = openCountry === c.code;
@@ -153,18 +282,19 @@ export function TrendsInstitutions({ papers, query }: { papers: Paper[]; query: 
               );
             })}
           </div>
-        </section>
+        </CollapsibleSection>
       )}
 
       {shownInstitutions.length > 0 && (
-        <section className="mb-10">
-          <div className="flex items-baseline justify-between gap-3 mb-3">
-            <h2 className="text-2xl font-serif italic">Institutions</h2>
+        <CollapsibleSection
+          id="institutions"
+          title="Institutions"
+          right={
             <span className="text-xs text-muted-foreground">
               Select variants of the same institution to group them.
             </span>
-          </div>
-
+          }
+        >
           {/* Grouping toolbar (shown when something is selected). */}
           {selected.size > 0 && (
             <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-copper/40 bg-copper/5 p-3">
@@ -252,7 +382,7 @@ export function TrendsInstitutions({ papers, query }: { papers: Paper[]; query: 
               );
             })}
           </div>
-        </section>
+        </CollapsibleSection>
       )}
     </>
   );
