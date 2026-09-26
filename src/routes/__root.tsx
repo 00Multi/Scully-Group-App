@@ -186,6 +186,7 @@ function RootComponent() {
                   <NavLink to="/">Dashboard</NavLink>
                   <NavLink to="/browse">Browse</NavLink>
                   <NavLink to="/trends">Trends</NavLink>
+                  <NavLink to="/plot">Plot</NavLink>
                   <NavLink to="/bulk">Bulk</NavLink>
                   <NavLink to="/import">Import</NavLink>
                   <NavLink to="/export">Export</NavLink>
