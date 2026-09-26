@@ -5,6 +5,7 @@ import { useSettings } from "@/lib/settings";
 import { TrendChart } from "@/components/TrendChart";
 import { TrendsInstitutions } from "@/components/TrendsInstitutions";
 import { RelationshipExplorer } from "@/components/RelationshipExplorer";
+import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { buildTrendSections } from "@/lib/trends";
 import { ArrowLeft, Search } from "lucide-react";
 
@@ -95,23 +96,21 @@ function TrendsPage() {
       )}
 
       {experiments.length > 0 && (
-        <section className="mb-10">
-          <h2 className="text-2xl font-serif italic mb-3">Explore a relationship</h2>
+        <CollapsibleSection id="relationship" title="Explore a relationship">
           <p className="mb-3 text-sm text-muted-foreground max-w-2xl">
             Pick two data points and plot one against the other. Numeric X fields are binned; the Y
             value is averaged per group (or counted when it isn't numeric). Switch a numeric plot to
             a line, and download any view as a PNG.
           </p>
           <RelationshipExplorer experiments={experiments} fieldDefs={fieldDefs} mounted={mounted} />
-        </section>
+        </CollapsibleSection>
       )}
 
       <TrendsInstitutions papers={papers} query={query} />
 
-      <div className="space-y-10">
+      <div>
         {filtered.map((section) => (
-          <section key={section.id}>
-            <h2 className="text-2xl font-serif italic mb-3">{section.label}</h2>
+          <CollapsibleSection key={section.id} id={`section:${section.id}`} title={section.label}>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {section.trends.map((t) => (
                 <TrendChart
@@ -123,7 +122,7 @@ function TrendsPage() {
                 />
               ))}
             </div>
-          </section>
+          </CollapsibleSection>
         ))}
       </div>
     </div>
