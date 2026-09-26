@@ -34,6 +34,9 @@ export interface TrendSpec {
   // categorical fields where splitting actually changes the result, so the
   // chart can offer a "split" toggle.
   splitData?: Bucket[];
+  // Raw numeric values for a number field, so the chart can re-bin them live
+  // with a specificity slider (and offer a line view).
+  values?: number[];
 }
 
 export interface TrendSection {
@@ -122,6 +125,56 @@ export function numericHistogram(experiments: Experiment[], key: string, targetB
   return Array.from(m.entries())
     .sort((a, b) => a[0] - b[0])
     .map(([bin, count]) => ({ label: `${fmt(bin)}–${fmt(bin + step)}`, count }));
+}
+
+// Raw finite numeric values of a field, for live re-binning in the chart.
+export function numericFieldValues(experiments: Experiment[], key: string): number[] {
+  const out: number[] = [];
+  for (const e of experiments) {
+    const v = e.values?.[key];
+    if (!v || v.state !== "filled") continue;
+    const n = typeof v.value === "number" ? v.value : Number(v.value);
+    if (Number.isFinite(n)) out.push(n);
+  }
+  return out;
+}
+
+export function distinctNumericCount(values: number[]): number {
+  return new Set(values).size;
+}
+
+// Bin numeric values into exactly `level` equal-width bars, or — when `level`
+// reaches the number of distinct values — show every unique value as its own
+// bar (so no data point is squished into an ambiguous range). Bins are
+// left-closed / right-open [lo, hi); the top bin includes the maximum.
+export function binValues(values: number[], level: number): Bucket[] {
+  if (values.length === 0) return [];
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (min === max) return [{ label: fmt(min), count: values.length }];
+
+  const uniq = Array.from(new Set(values)).sort((a, b) => a - b);
+  const bins = Math.max(1, Math.min(Math.floor(level), uniq.length));
+
+  // Finest setting: one bar per distinct value, labelled with the exact value.
+  if (bins >= uniq.length) {
+    const freq = new Map<number, number>();
+    for (const v of values) freq.set(v, (freq.get(v) ?? 0) + 1);
+    return uniq.map((v) => ({ label: fmt(v), count: freq.get(v) ?? 0 }));
+  }
+
+  const width = (max - min) / bins;
+  const counts = new Array(bins).fill(0);
+  for (const v of values) {
+    let idx = Math.floor((v - min) / width);
+    if (idx >= bins) idx = bins - 1;
+    if (idx < 0) idx = 0;
+    counts[idx]++;
+  }
+  return counts.map((count, i) => ({
+    label: `${fmt(min + i * width)}–${fmt(min + (i + 1) * width)}`,
+    count,
+  }));
 }
 
 // Distribution of a paper-metadata string, one count per paper. `split` breaks a
@@ -330,7 +383,10 @@ export function buildTrendSections(
       if (f.group !== g.id || f.type === "image") continue;
       if (f.type === "number") {
         const data = numericHistogram(experiments, f.key);
-        if (data.length > 0) trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data });
+        if (data.length > 0) {
+          const values = numericFieldValues(experiments, f.key);
+          trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data, values });
+        }
         continue;
       }
       const data = categoricalDistribution(experiments, f.key);
