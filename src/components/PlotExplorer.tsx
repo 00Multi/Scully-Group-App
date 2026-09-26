@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   CartesianGrid,
   Legend,
@@ -18,6 +19,7 @@ import {
   EyeOff,
   Grid3x3,
   Loader2,
+  Pencil,
   Plus,
   RotateCcw,
   Shapes,
@@ -41,6 +43,7 @@ import {
   seriesColor,
   seriesPoints,
   type Constraint,
+  type PlotPoint,
   type PlotState,
   type Series,
 } from "@/lib/plot";
@@ -80,7 +83,12 @@ export function PlotExplorer({
   mounted: boolean;
 }) {
   const { record } = useHistory();
+  const navigate = useNavigate();
   const cardRef = useRef<HTMLDivElement>(null);
+  // Last cursor position over the chart, so the point menu opens where clicked.
+  const clickPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  // The point the user clicked — drives the delete/edit menu.
+  const [menu, setMenu] = useState<{ x: number; y: number; point: PlotPoint } | null>(null);
 
   const numFields = useMemo(() => numericFields(experiments, fieldDefs), [experiments, fieldDefs]);
   const filterFields = useMemo(
@@ -256,6 +264,25 @@ export function PlotExplorer({
     );
   };
 
+  // Clicking a point opens a small menu (delete / edit in Browse) at the cursor.
+  const openPointMenu = (point: PlotPoint | undefined) => {
+    if (!point) return;
+    setMenu({ x: clickPos.current.x, y: clickPos.current.y, point });
+  };
+  const editInBrowse = (point: PlotPoint) => {
+    setMenu(null);
+    navigate({
+      to: "/browse",
+      search: { paper: point.paperId, exp: point.expId, view: "data" },
+    });
+  };
+  useEffect(() => {
+    if (!menu) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenu(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menu]);
+
   // ---- Reset ("start over") with confirmation ----
   const [confirmReset, setConfirmReset] = useState(false);
   useEffect(() => {
@@ -366,10 +393,15 @@ export function PlotExplorer({
 
         <div className="mb-1 text-[10px] text-muted-foreground">
           {totalPoints} point{totalPoints === 1 ? "" : "s"} · one per experiment with both values ·
-          click a point to remove it
+          click a point to delete it or edit it in Browse
         </div>
 
-        <div style={{ width: "100%", height: 460 }}>
+        <div
+          style={{ width: "100%", height: 460 }}
+          onClickCapture={(e) => {
+            clickPos.current = { x: e.clientX, y: e.clientY };
+          }}
+        >
           {mounted && (
             <ResponsiveContainer width="100%" height="100%">
               <ScatterChart margin={{ top: 10, right: 20, left: 12, bottom: 28 }}>
@@ -432,9 +464,7 @@ export function PlotExplorer({
                       shape={shape}
                       legendType={shape}
                       isAnimationActive={false}
-                      onClick={(node: { payload?: { key?: string } }) =>
-                        removePoint(node?.payload?.key)
-                      }
+                      onClick={(node: { payload?: PlotPoint }) => openPointMenu(node?.payload)}
                       style={{ cursor: "pointer" }}
                     />
                   ))}
@@ -582,6 +612,70 @@ export function PlotExplorer({
             </button>
           </div>
         </div>
+      </div>
+
+      {menu && (
+        <PointMenu
+          menu={menu}
+          onClose={() => setMenu(null)}
+          onDelete={() => {
+            removePoint(menu.point.key);
+            setMenu(null);
+          }}
+          onEdit={() => editInBrowse(menu.point)}
+        />
+      )}
+    </div>
+  );
+}
+
+// A small menu anchored at the clicked point: delete it, or jump to that
+// experiment in Browse to edit its cell values.
+function PointMenu({
+  menu,
+  onClose,
+  onDelete,
+  onEdit,
+}: {
+  menu: { x: number; y: number; point: PlotPoint };
+  onClose: () => void;
+  onDelete: () => void;
+  onEdit: () => void;
+}) {
+  const { x, y, point } = menu;
+  // Keep the menu on-screen near the cursor.
+  const left = Math.min(x, (typeof window !== "undefined" ? window.innerWidth : x) - 232);
+  const top = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : y) - 150);
+  return (
+    <div className="fixed inset-0 z-50" onMouseDown={onClose}>
+      <div
+        className="absolute w-56 rounded-lg border border-rule bg-card p-1.5 shadow-xl"
+        style={{ left, top }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="px-2 py-1.5">
+          <div className="truncate text-xs font-medium text-foreground">{point.label}</div>
+          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+            ({point.x}, {point.y})
+          </div>
+        </div>
+        <div className="my-1 h-px bg-rule/60" />
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-foreground hover:bg-accent"
+        >
+          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+          Edit in Browse
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+          Delete point
+        </button>
       </div>
     </div>
   );

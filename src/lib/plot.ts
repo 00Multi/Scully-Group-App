@@ -149,6 +149,7 @@ export interface PlotPoint {
   y: number;
   key: string; // `${seriesId}::${experimentId}`
   expId: string;
+  paperId: string;
   label: string; // e.g. "Yang 2022 · Experiment 1"
 }
 
@@ -172,7 +173,7 @@ export function seriesPoints(
     const key = `${series.id}::${e.id}`;
     if (removed.has(key)) continue;
     const cite = citeById.get(e.paper_id) || "Unknown";
-    pts.push({ x, y, key, expId: e.id, label: `${cite} · ${e.label}` });
+    pts.push({ x, y, key, expId: e.id, paperId: e.paper_id, label: `${cite} · ${e.label}` });
   }
   pts.sort((a, b) => a.x - b.x);
   return pts;
