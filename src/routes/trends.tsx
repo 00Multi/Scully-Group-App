@@ -119,6 +119,7 @@ function TrendsPage() {
                   title={t.title}
                   data={t.data}
                   splitData={t.splitData}
+                  values={t.values}
                   mounted={mounted}
                 />
               ))}
