@@ -64,7 +64,7 @@ function CountryChart({
 }) {
   const maxChars = data.reduce((m, d) => Math.max(m, d.label.length), 1);
   const rotate = data.length > 4 || maxChars > 6;
-  const height = 200 + (rotate ? 40 : 0);
+  const height = 224 + (rotate ? 40 : 0);
   const xAxis = (
     <XAxis
       dataKey="label"
@@ -72,10 +72,16 @@ function CountryChart({
       interval={mode === "line" ? "preserveStartEnd" : 0}
       angle={rotate ? -35 : 0}
       textAnchor={rotate ? "end" : "middle"}
-      height={rotate ? 60 : 22}
+      height={(rotate ? 60 : 22) + 20}
       tickMargin={6}
       stroke="currentColor"
       className="text-muted-foreground"
+      label={{
+        value: "Country",
+        position: "insideBottom",
+        offset: 0,
+        style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" },
+      }}
     />
   );
   const yAxis = (
@@ -84,8 +90,14 @@ function CountryChart({
       tick={{ fontSize: 10, fill: "currentColor" }}
       stroke="currentColor"
       className="text-muted-foreground"
-      width={36}
+      width={52}
       tickMargin={4}
+      label={{
+        value: "Papers",
+        angle: -90,
+        position: "insideLeft",
+        style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" },
+      }}
     />
   );
   return (

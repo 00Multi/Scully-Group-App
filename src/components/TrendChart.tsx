@@ -37,6 +37,8 @@ export function TrendChart({
   splitData,
   values,
   palette = "default",
+  xLabel,
+  yLabel = "Count",
   mounted,
   height = 180,
 }: {
@@ -50,6 +52,9 @@ export function TrendChart({
   values?: number[];
   // Colour palette for the bars (see lib/palettes).
   palette?: PaletteName;
+  // Axis titles.
+  xLabel?: string;
+  yLabel?: string;
   mounted: boolean;
   height?: number;
 }) {
@@ -126,8 +131,29 @@ export function TrendChart({
     v.length > maxTickChars ? v.slice(0, Math.max(1, maxTickChars - 1)) + "…" : v;
 
   const maxCount = shown.reduce((m, d) => Math.max(m, d.count), 0);
-  const yAxisWidth = Math.max(30, String(maxCount).length * 8 + 14);
-  const containerHeight = height + Math.max(0, xAxisHeight - 30);
+  // Extra room for the axis titles.
+  const xLabelBand = xLabel ? 20 : 0;
+  const xAxisTotalHeight = xAxisHeight + xLabelBand;
+  const yAxisWidth = Math.max(30, String(maxCount).length * 8 + 14) + (yLabel ? 16 : 0);
+  const containerHeight = height + Math.max(0, xAxisHeight - 30) + xLabelBand;
+
+  // Recharts label configs (only when a title is provided).
+  const xAxisLabel = xLabel
+    ? {
+        value: xLabel,
+        position: "insideBottom" as const,
+        offset: 0,
+        style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" as const },
+      }
+    : undefined;
+  const yAxisLabel = yLabel
+    ? {
+        value: yLabel,
+        angle: -90,
+        position: "insideLeft" as const,
+        style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" as const },
+      }
+    : undefined;
 
   const atExact = isNumeric && effLevel >= distinct;
   const detailLabel = atExact
@@ -260,10 +286,11 @@ export function TrendChart({
                   interval="preserveStartEnd"
                   angle={angle}
                   textAnchor={rotate ? "end" : "middle"}
-                  height={xAxisHeight}
+                  height={xAxisTotalHeight}
                   tickMargin={6}
                   stroke="currentColor"
                   className="text-muted-foreground"
+                  label={xAxisLabel}
                 />
                 <YAxis
                   allowDecimals={false}
@@ -272,6 +299,7 @@ export function TrendChart({
                   className="text-muted-foreground"
                   width={yAxisWidth}
                   tickMargin={4}
+                  label={yAxisLabel}
                 />
                 <RTooltip
                   contentStyle={{ fontSize: 12, borderRadius: 8 }}
@@ -294,10 +322,11 @@ export function TrendChart({
                   interval={0}
                   angle={angle}
                   textAnchor={rotate ? "end" : "middle"}
-                  height={xAxisHeight}
+                  height={xAxisTotalHeight}
                   tickMargin={6}
                   stroke="currentColor"
                   className="text-muted-foreground"
+                  label={xAxisLabel}
                 />
                 <YAxis
                   allowDecimals={false}
@@ -306,6 +335,7 @@ export function TrendChart({
                   className="text-muted-foreground"
                   width={yAxisWidth}
                   tickMargin={4}
+                  label={yAxisLabel}
                 />
                 <RTooltip
                   cursor={{ fill: "rgba(184,115,51,0.08)" }}

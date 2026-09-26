@@ -121,6 +121,19 @@ export function RelationshipExplorer({
   const points = result?.points ?? [];
   const maxChars = points.reduce((m, p) => Math.max(m, p.label.length), 1);
   const rotate = points.length > 5 || maxChars > 6;
+  const xAxisHeight = (rotate ? 60 : 22) + 20; // room for the x-axis title
+  const xAxisLabel = {
+    value: xField ? fieldTitle(xField) : "",
+    position: "insideBottom" as const,
+    offset: 0,
+    style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" as const },
+  };
+  const yAxisLabel = {
+    value: result?.yLabel ?? "",
+    angle: -90,
+    position: "insideLeft" as const,
+    style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" as const },
+  };
 
   const iconBtn =
     "rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50";
@@ -213,7 +226,7 @@ export function RelationshipExplorer({
             {result?.yLabel} by {xField ? fieldTitle(xField) : ""} · {result?.total} experiment
             {result?.total === 1 ? "" : "s"}
           </div>
-          <div style={{ width: "100%", height: 240 }}>
+          <div style={{ width: "100%", height: 264 }}>
             {mounted && (
               <ResponsiveContainer width="100%" height="100%">
                 {effectiveMode === "line" ? (
@@ -229,17 +242,19 @@ export function RelationshipExplorer({
                       interval={0}
                       angle={rotate ? -35 : 0}
                       textAnchor={rotate ? "end" : "middle"}
-                      height={rotate ? 60 : 22}
+                      height={xAxisHeight}
                       tickMargin={6}
                       stroke="currentColor"
                       className="text-muted-foreground"
+                      label={xAxisLabel}
                     />
                     <YAxis
                       tick={{ fontSize: 10, fill: "currentColor" }}
                       stroke="currentColor"
                       className="text-muted-foreground"
-                      width={44}
+                      width={60}
                       tickMargin={4}
+                      label={yAxisLabel}
                     />
                     <RTooltip content={<RelTooltip yLabel={result?.yLabel ?? ""} />} />
                     <Line
@@ -263,17 +278,19 @@ export function RelationshipExplorer({
                       interval={0}
                       angle={rotate ? -35 : 0}
                       textAnchor={rotate ? "end" : "middle"}
-                      height={rotate ? 60 : 22}
+                      height={xAxisHeight}
                       tickMargin={6}
                       stroke="currentColor"
                       className="text-muted-foreground"
+                      label={xAxisLabel}
                     />
                     <YAxis
                       tick={{ fontSize: 10, fill: "currentColor" }}
                       stroke="currentColor"
                       className="text-muted-foreground"
-                      width={44}
+                      width={60}
                       tickMargin={4}
+                      label={yAxisLabel}
                     />
                     <RTooltip
                       cursor={{ fill: "rgba(184,115,51,0.08)" }}

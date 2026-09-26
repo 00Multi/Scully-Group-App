@@ -156,6 +156,8 @@ function TrendsPage() {
                   splitData={t.splitData}
                   values={t.values}
                   palette={palette}
+                  xLabel={t.xLabel}
+                  yLabel={t.yLabel}
                   mounted={mounted}
                 />
               ))}
