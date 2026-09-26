@@ -6,7 +6,7 @@ import type { Experiment, Paper } from "./db";
 import type { FieldDef, GroupDef } from "./fields";
 import { readInstitutionRefs, type Institution } from "./ror";
 import { readPaperCountries } from "./countries";
-import { groupByMember, type InstitutionGroup } from "./institutionGroups";
+import { groupByMember, groupByPaperId, type InstitutionGroup } from "./institutionGroups";
 
 export interface Bucket {
   label: string;
@@ -161,6 +161,7 @@ export function institutionCounts(
   groups: InstitutionGroup[] = [],
 ): InstitutionCount[] {
   const byMember = groupByMember(groups);
+  const byPaper = groupByPaperId(groups);
   const m = new Map<string, InstitutionCount>();
   for (const p of papers) {
     // Count each institution (or group) at most once per paper.
@@ -191,6 +192,26 @@ export function institutionCounts(
         });
       } else {
         m.set(key, { ...inst, count: 1 });
+      }
+    }
+    // Papers explicitly dragged/assigned into a group also count under it, even
+    // when the paper's institution text doesn't match any member variant.
+    for (const grp of byPaper.get(p.id) ?? []) {
+      const key = `g:${grp.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const prev = m.get(key);
+      if (prev) {
+        prev.count++;
+      } else {
+        m.set(key, {
+          name: grp.shorthand,
+          countryCode: grp.country?.code,
+          countryName: grp.country?.name,
+          count: 1,
+          groupId: grp.id,
+          members: [],
+        });
       }
     }
   }
