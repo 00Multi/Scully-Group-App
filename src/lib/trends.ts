@@ -37,6 +37,9 @@ export interface TrendSpec {
   // Raw numeric values for a number field, so the chart can re-bin them live
   // with a specificity slider (and offer a line view).
   values?: number[];
+  // Axis titles.
+  xLabel?: string;
+  yLabel?: string;
 }
 
 export interface TrendSection {
@@ -354,16 +357,36 @@ export function buildTrendSections(
   const sections: TrendSection[] = [];
 
   const meta: TrendSpec[] = [
-    { id: "meta:year", title: "Papers per year", data: papersPerYear(papers) },
+    {
+      id: "meta:year",
+      title: "Papers per year",
+      data: papersPerYear(papers),
+      xLabel: "Year",
+      yLabel: "Papers",
+    },
     {
       id: "meta:journal",
       title: "Journals",
       data: paperFieldDistribution(papers, (p) => p.journal),
+      xLabel: "Journal",
+      yLabel: "Papers",
     },
     // Institutions are shown as a dedicated panel (with logos/flags) on the
     // Trends page, so they are intentionally not duplicated as a bar chart here.
-    { id: "meta:author", title: "Authors", data: paperFieldDistribution(papers, (p) => p.author) },
-    { id: "meta:keywords", title: "Keywords", data: keywordDistribution(papers) },
+    {
+      id: "meta:author",
+      title: "Authors",
+      data: paperFieldDistribution(papers, (p) => p.author),
+      xLabel: "Author",
+      yLabel: "Papers",
+    },
+    {
+      id: "meta:keywords",
+      title: "Keywords",
+      data: keywordDistribution(papers),
+      xLabel: "Keyword",
+      yLabel: "Papers",
+    },
   ].filter((t) => t.data.length > 0);
   if (meta.length) sections.push({ id: "metadata", label: "Metadata", trends: meta });
 
@@ -373,7 +396,15 @@ export function buildTrendSections(
     sections.push({
       id: "variables",
       label: "Variables studied",
-      trends: [{ id: "variables:all", title: "Papers per variable", data: variables }],
+      trends: [
+        {
+          id: "variables:all",
+          title: "Papers per variable",
+          data: variables,
+          xLabel: "Variable",
+          yLabel: "Papers",
+        },
+      ],
     });
   }
 
@@ -385,7 +416,14 @@ export function buildTrendSections(
         const data = numericHistogram(experiments, f.key);
         if (data.length > 0) {
           const values = numericFieldValues(experiments, f.key);
-          trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data, values });
+          trends.push({
+            id: `field:${f.key}`,
+            title: fieldTitle(f),
+            data,
+            values,
+            xLabel: fieldTitle(f),
+            yLabel: "Experiments",
+          });
         }
         continue;
       }
@@ -394,7 +432,14 @@ export function buildTrendSections(
       // Offer a "split" view only when some cell actually held several values.
       const split = categoricalDistribution(experiments, f.key, 8, true);
       const splitData = split.length && !bucketsEqual(split, data) ? split : undefined;
-      trends.push({ id: `field:${f.key}`, title: fieldTitle(f), data, splitData });
+      trends.push({
+        id: `field:${f.key}`,
+        title: fieldTitle(f),
+        data,
+        splitData,
+        xLabel: fieldTitle(f),
+        yLabel: "Experiments",
+      });
     }
     if (trends.length) sections.push({ id: g.id, label: g.label, trends });
   }
