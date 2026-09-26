@@ -11,6 +11,7 @@ export interface InstitutionGroup {
   shorthand: string;
   country?: { code: string; name: string };
   members: string[]; // institution names, matched case-insensitively
+  papers?: string[]; // paper ids explicitly assigned to this group
 }
 
 const ROW_ID = "default";
@@ -82,4 +83,38 @@ export function groupByMember(groups: InstitutionGroup[]): Map<string, Instituti
     }
   }
   return m;
+}
+
+// Index each paper id → the groups it has been explicitly assigned to.
+export function groupByPaperId(groups: InstitutionGroup[]): Map<string, InstitutionGroup[]> {
+  const m = new Map<string, InstitutionGroup[]>();
+  for (const g of groups) {
+    for (const pid of g.papers ?? []) {
+      const list = m.get(pid) ?? [];
+      list.push(g);
+      m.set(pid, list);
+    }
+  }
+  return m;
+}
+
+// The set of group ids a paper is explicitly assigned to.
+export function paperGroupIds(groups: InstitutionGroup[], paperId: string): Set<string> {
+  return new Set(groups.filter((g) => (g.papers ?? []).includes(paperId)).map((g) => g.id));
+}
+
+// Return a new groups array with `paperId` added to / removed from a group.
+export function setPaperInGroup(
+  groups: InstitutionGroup[],
+  groupId: string,
+  paperId: string,
+  member: boolean,
+): InstitutionGroup[] {
+  return groups.map((g) => {
+    if (g.id !== groupId) return g;
+    const papers = new Set(g.papers ?? []);
+    if (member) papers.add(paperId);
+    else papers.delete(paperId);
+    return { ...g, papers: Array.from(papers) };
+  });
 }

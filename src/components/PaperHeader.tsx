@@ -12,6 +12,7 @@ import { useFieldDefs } from "@/lib/settings";
 import { useHistory, inversePatch } from "@/lib/history";
 import { AutoTextarea } from "./AutoTextarea";
 import { InstitutionEditor } from "./InstitutionEditor";
+import { PaperGroups } from "./PaperGroups";
 import { CountryEditor } from "./CountryEditor";
 import { VariablesSelect } from "./VariablesSelect";
 import { FileUp, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
@@ -369,6 +370,12 @@ export function PaperHeader({ paper, nextPosition }: { paper: Paper; nextPositio
             Institution(s)
           </label>
           <InstitutionEditor paper={paper} />
+        </div>
+        <div className="md:col-span-2">
+          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
+            Institution groups
+          </label>
+          <PaperGroups paper={paper} />
         </div>
         <div className="md:col-span-2">
           <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">
