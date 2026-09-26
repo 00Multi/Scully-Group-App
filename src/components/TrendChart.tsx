@@ -19,11 +19,10 @@ import {
   LineChart as LineIcon,
   Loader2,
 } from "lucide-react";
-import { binValues, CHART_COLORS, distinctNumericCount, type Bucket } from "@/lib/trends";
+import { binValues, distinctNumericCount, type Bucket } from "@/lib/trends";
+import { barColor, paletteAccent, type PaletteName } from "@/lib/palettes";
 import { canCopyImages, captureCardPng, copyPngToClipboard } from "@/lib/chartImage";
 import { downloadBlob, sanitizeFilename } from "@/lib/download";
-
-const COPPER = "#b87333";
 // Approx width (px) of one tick character at fontSize 10.
 const CHAR_PX = 6.2;
 // Never let the x-axis label band grow past this; longer labels are ellipsized
@@ -37,6 +36,7 @@ export function TrendChart({
   data,
   splitData,
   values,
+  palette = "default",
   mounted,
   height = 180,
 }: {
@@ -48,6 +48,8 @@ export function TrendChart({
   // Raw numeric values for a number field — enables the specificity slider and
   // the line view (the chart re-bins these live).
   values?: number[];
+  // Colour palette for the bars (see lib/palettes).
+  palette?: PaletteName;
   mounted: boolean;
   height?: number;
 }) {
@@ -278,9 +280,9 @@ export function TrendChart({
                 <Line
                   type="monotone"
                   dataKey="count"
-                  stroke={COPPER}
+                  stroke={paletteAccent(palette)}
                   strokeWidth={2}
-                  dot={{ r: 2, fill: COPPER }}
+                  dot={{ r: 2, fill: paletteAccent(palette) }}
                 />
               </LineChart>
             ) : (
@@ -312,7 +314,7 @@ export function TrendChart({
                 />
                 <RBar dataKey="count" radius={[3, 3, 0, 0]}>
                   {shown.map((_, i) => (
-                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                    <Cell key={i} fill={barColor(palette, i, shown.length)} />
                   ))}
                 </RBar>
               </BarChart>
