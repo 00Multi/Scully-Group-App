@@ -14,6 +14,8 @@ import {
   Check,
   Clipboard,
   Download,
+  Eye,
+  EyeOff,
   Grid3x3,
   Loader2,
   Plus,
@@ -211,7 +213,8 @@ export function PlotExplorer({
       removedSet,
     ],
   );
-  const totalPoints = seriesData.reduce((n, s) => n + s.points.length, 0);
+  const visibleCount = seriesData.filter(({ series }) => !series.hidden).length;
+  const totalPoints = seriesData.reduce((n, s) => n + (s.series.hidden ? 0 : s.points.length), 0);
 
   // ---- Series operations (all read fresh state via the producer form) ----
   const addSeries = () =>
@@ -409,30 +412,32 @@ export function PlotExplorer({
                 />
                 <ZAxis type="number" range={[46, 46]} />
                 <RTooltip content={<PlotTooltip xTitle={xTitle} yTitle={yTitle} />} />
-                {seriesData.length > 1 && (
+                {visibleCount > 1 && (
                   <Legend
                     verticalAlign="bottom"
                     height={24}
                     wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
-                    iconType="circle"
                   />
                 )}
-                {seriesData.map(({ series, color, shape, points }) => (
-                  <Scatter
-                    key={series.id}
-                    name={series.name}
-                    data={points}
-                    fill={color}
-                    line={state.connect ? { stroke: color, strokeWidth: 2 } : false}
-                    lineJointType="linear"
-                    shape={shape}
-                    isAnimationActive={false}
-                    onClick={(node: { payload?: { key?: string } }) =>
-                      removePoint(node?.payload?.key)
-                    }
-                    style={{ cursor: "pointer" }}
-                  />
-                ))}
+                {seriesData
+                  .filter(({ series }) => !series.hidden)
+                  .map(({ series, color, shape, points }) => (
+                    <Scatter
+                      key={series.id}
+                      name={series.name}
+                      data={points}
+                      fill={color}
+                      line={state.connect ? { stroke: color, strokeWidth: 2 } : false}
+                      lineJointType="linear"
+                      shape={shape}
+                      legendType={shape}
+                      isAnimationActive={false}
+                      onClick={(node: { payload?: { key?: string } }) =>
+                        removePoint(node?.payload?.key)
+                      }
+                      style={{ cursor: "pointer" }}
+                    />
+                  ))}
               </ScatterChart>
             </ResponsiveContainer>
           )}
@@ -715,8 +720,12 @@ function SeriesRow({
     setPickOpen(false);
   };
 
+  const dim = series.hidden ? "opacity-40" : "";
+
   return (
-    <div className="rounded-md border border-rule/70 p-2.5">
+    <div
+      className={"rounded-md border border-rule/70 p-2.5" + (series.hidden ? " bg-muted/30" : "")}
+    >
       <div className="flex items-center gap-2">
         <div className="relative">
           <button
@@ -724,7 +733,7 @@ function SeriesRow({
             aria-label="Series colour"
             title="Change this series' colour"
             onClick={() => setPickOpen((o) => !o)}
-            className="h-5 w-5 shrink-0 rounded-full border border-black/10 shadow-sm"
+            className={"h-5 w-5 shrink-0 rounded-full border border-black/10 shadow-sm " + dim}
             style={{ backgroundColor: color }}
           />
           {pickOpen && (
@@ -736,14 +745,33 @@ function SeriesRow({
           )}
         </div>
         <input
-          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-input focus:border-primary focus:outline-none"
+          className={
+            "min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-input focus:border-primary focus:outline-none " +
+            dim
+          }
           value={series.name}
           onFocus={onBeginEdit}
           onChange={(e) => onLiveName(e.target.value)}
           onBlur={() => onEndEdit("Rename series")}
           placeholder={autoName(series.constraints, fieldDefs, index)}
         />
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{count}</span>
+        <span className={"shrink-0 font-mono text-[10px] text-muted-foreground " + dim}>
+          {count}
+        </span>
+        <button
+          type="button"
+          onClick={() =>
+            onChange(
+              { ...series, hidden: !series.hidden },
+              series.hidden ? "Show series" : "Hide series",
+            )
+          }
+          aria-label={series.hidden ? "Show series" : "Hide series"}
+          title={series.hidden ? "Show series" : "Hide series"}
+          className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          {series.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </button>
         <button
           type="button"
           onClick={onRemove}

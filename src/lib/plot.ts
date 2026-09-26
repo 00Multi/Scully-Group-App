@@ -40,6 +40,8 @@ export interface Series {
   constraints: Constraint[];
   // Explicit colour override; null means "derive from the palette by position".
   color: string | null;
+  // When true the series stays defined but isn't drawn (or shown in the legend).
+  hidden?: boolean;
 }
 
 // The whole plot's state — everything the user can change. Kept serializable so
