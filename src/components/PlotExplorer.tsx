@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   CartesianGrid,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -25,6 +26,7 @@ import {
   Shapes,
   Spline,
   Trash2,
+  TrendingUp,
   X,
 } from "lucide-react";
 import type { Experiment, Paper } from "@/lib/db";
@@ -36,7 +38,9 @@ import {
   constrainableFields,
   distinctValues,
   fieldTitle,
+  fmtNum,
   initialPlotState,
+  linearFit,
   makeId,
   numericFields,
   POINT_SHAPES,
@@ -89,6 +93,8 @@ export function PlotExplorer({
   const clickPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   // The point the user clicked — drives the delete/edit menu.
   const [menu, setMenu] = useState<{ x: number; y: number; point: PlotPoint } | null>(null);
+  // Whether the best-fit line colour picker is open.
+  const [fitPickOpen, setFitPickOpen] = useState(false);
 
   const numFields = useMemo(() => numericFields(experiments, fieldDefs), [experiments, fieldDefs]);
   const filterFields = useMemo(
@@ -223,6 +229,20 @@ export function PlotExplorer({
   );
   const visibleCount = seriesData.filter(({ series }) => !series.hidden).length;
   const totalPoints = seriesData.reduce((n, s) => n + (s.series.hidden ? 0 : s.points.length), 0);
+
+  // Least-squares fit per visible series (only when the toggle is on).
+  const fits = useMemo(
+    () =>
+      seriesData
+        .filter(({ series }) => !series.hidden)
+        .map((s) => ({
+          id: s.series.id,
+          name: s.series.name,
+          color: state.fitColor ?? s.color,
+          fit: state.bestFit ? linearFit(s.points) : null,
+        })),
+    [seriesData, state.bestFit, state.fitColor],
+  );
 
   // ---- Series operations (all read fresh state via the producer form) ----
   const addSeries = () =>
@@ -468,10 +488,56 @@ export function PlotExplorer({
                       style={{ cursor: "pointer" }}
                     />
                   ))}
+                {state.bestFit &&
+                  fits.map(({ id, color, fit }) =>
+                    fit ? (
+                      <ReferenceLine
+                        key={`fit-${id}`}
+                        ifOverflow="hidden"
+                        stroke={color}
+                        strokeWidth={2}
+                        strokeDasharray="6 4"
+                        segment={[
+                          { x: fit.x0, y: fit.slope * fit.x0 + fit.intercept },
+                          { x: fit.x1, y: fit.slope * fit.x1 + fit.intercept },
+                        ]}
+                      />
+                    ) : null,
+                  )}
               </ScatterChart>
             </ResponsiveContainer>
           )}
         </div>
+
+        {/* ---- Best-fit slope / correlation readout ---- */}
+        {state.bestFit && fits.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-rule/70 bg-muted/20 px-3 py-1.5 text-[11px]">
+            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              <TrendingUp className="h-3 w-3" /> Best fit
+            </span>
+            {fits.map(({ id, name, color, fit }) => (
+              <span key={id} className="inline-flex items-center gap-1.5">
+                <span
+                  className="inline-block h-0.5 w-4 rounded"
+                  style={{ backgroundColor: color }}
+                  aria-hidden
+                />
+                <span className="text-muted-foreground">{name}:</span>
+                {fit ? (
+                  <>
+                    slope <span className="font-mono text-foreground">{fmtNum(fit.slope)}</span>
+                    <span className="text-muted-foreground">·</span>r{" "}
+                    <span className="font-mono text-foreground">{fmtNum(fit.r)}</span>
+                    <span className="text-muted-foreground">·</span>
+                    R² <span className="font-mono text-foreground">{fmtNum(fit.r2)}</span>
+                  </>
+                ) : (
+                  <span className="italic text-muted-foreground">too few points</span>
+                )}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* ---- Toggles & palette ---- */}
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -496,6 +562,42 @@ export function PlotExplorer({
           >
             <Shapes className="h-3.5 w-3.5" /> Vary shapes
           </button>
+          <button
+            type="button"
+            className={toggle(!!state.bestFit)}
+            onClick={() => patch({ bestFit: !state.bestFit }, "Toggle best fit")}
+            title="Draw a least-squares trend line for each visible series"
+          >
+            <TrendingUp className="h-3.5 w-3.5" /> Best fit
+          </button>
+          {state.bestFit && (
+            <div className="relative">
+              <button
+                type="button"
+                aria-label="Best-fit line colour"
+                title={
+                  state.fitColor
+                    ? "Best-fit line colour"
+                    : "Best-fit line colour (auto: each series' colour)"
+                }
+                onClick={() => setFitPickOpen((o) => !o)}
+                className="flex h-7 w-7 items-center justify-center rounded-md border border-rule shadow-sm"
+                style={{ backgroundColor: state.fitColor ?? "transparent" }}
+              >
+                {!state.fitColor && <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />}
+              </button>
+              {fitPickOpen && (
+                <ColorPopover
+                  current={state.fitColor ?? null}
+                  onPick={(c) => {
+                    patch({ fitColor: c }, "Best-fit colour");
+                    setFitPickOpen(false);
+                  }}
+                  onClose={() => setFitPickOpen(false)}
+                />
+              )}
+            </div>
+          )}
           <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
             Palette
             <select

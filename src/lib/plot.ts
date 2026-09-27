@@ -65,6 +65,9 @@ export interface PlotState {
   showGrid: boolean;
   connect: boolean; // connect each series' points with a line
   varyShapes: boolean; // give each series a distinct point shape
+  bestFit?: boolean; // draw a least-squares trend line per visible series
+  // Colour override for the best-fit lines; null uses each series' colour.
+  fitColor?: string | null;
 }
 
 export const fieldTitle = (f: FieldDef) => (f.unit ? `${f.label} (${f.unit})` : f.label);
@@ -184,6 +187,56 @@ export function seriesColor(series: Series, i: number, n: number, palette: Palet
   return series.color ?? barColor(palette, i, n);
 }
 
+// Ordinary least-squares fit of y = slope·x + intercept, plus the Pearson
+// correlation r (and r²). Returns null when there aren't at least two points or
+// the x-values have no spread (a vertical cloud, where slope is undefined).
+export interface FitResult {
+  slope: number;
+  intercept: number;
+  r: number;
+  r2: number;
+  n: number;
+  x0: number; // smallest x among the points
+  x1: number; // largest x among the points
+}
+export function linearFit(points: { x: number; y: number }[]): FitResult | null {
+  const n = points.length;
+  if (n < 2) return null;
+  let sx = 0,
+    sy = 0,
+    sxx = 0,
+    sxy = 0,
+    syy = 0,
+    x0 = Infinity,
+    x1 = -Infinity;
+  for (const p of points) {
+    sx += p.x;
+    sy += p.y;
+    sxx += p.x * p.x;
+    sxy += p.x * p.y;
+    syy += p.y * p.y;
+    if (p.x < x0) x0 = p.x;
+    if (p.x > x1) x1 = p.x;
+  }
+  const dxx = n * sxx - sx * sx;
+  if (dxx === 0) return null; // no spread in x → slope undefined
+  const slope = (n * sxy - sx * sy) / dxx;
+  const intercept = (sy - slope * sx) / n;
+  const dyy = n * syy - sy * sy;
+  const denom = Math.sqrt(dxx * dyy);
+  const r = denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
+  return { slope, intercept, r, r2: r * r, n, x0, x1 };
+}
+
+// Compact human-readable number: fixed for everyday magnitudes, scientific for
+// very large or very small ones.
+export function fmtNum(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if (a !== 0 && (a >= 1e4 || a < 1e-3)) return v.toExponential(2);
+  return String(Math.round(v * 1000) / 1000);
+}
+
 // A concise auto-name for a series from its active constraints, e.g.
 // "Salt = FLiNaK · F/S = Flowing". Falls back to a positional default.
 export function autoName(constraints: Constraint[], fieldDefs: FieldDef[], index: number): string {
@@ -221,6 +274,8 @@ export function initialPlotState(experiments: Experiment[], fieldDefs: FieldDef[
     showGrid: true,
     connect: false,
     varyShapes: false,
+    bestFit: false,
+    fitColor: null,
   };
 }
 
