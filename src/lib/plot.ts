@@ -8,7 +8,7 @@
 // slices of the data can be compared on the same axes.
 
 import type { Experiment, Paper } from "./db";
-import type { FieldDef } from "./fields";
+import { valueKey, variantLabel, type FieldDef, type FieldVariant } from "./fields";
 import { barColor, type PaletteName } from "./palettes";
 
 // Recharts' built-in scatter symbols. Used when "vary shapes" is on so each
@@ -97,20 +97,74 @@ export function rawValue(exp: Experiment, key: string): string | null {
   return String(v);
 }
 
-// Fields worth offering as an axis: those with at least a couple of numeric
-// values across the dataset.
-export function numericFields(experiments: Experiment[], fieldDefs: FieldDef[]): FieldDef[] {
-  return fieldDefs.filter((f) => {
-    if (f.type === "image") return false;
-    let n = 0;
-    for (const e of experiments) {
-      if (toNumber(e.values?.[f.key]?.value) != null) {
-        n++;
-        if (n >= 2) return true;
-      }
+// How many experiments have a finite numeric value for a given value-key.
+function numericCount(experiments: Experiment[], key: string, stopAt = Infinity): number {
+  let n = 0;
+  for (const e of experiments) {
+    if (toNumber(e.values?.[key]?.value) != null) {
+      n++;
+      if (n >= stopAt) return n;
     }
-    return false;
-  });
+  }
+  return n;
+}
+
+// Fields worth offering as an axis: those with at least a couple of numeric
+// values across the dataset (used to seed the default X/Y).
+export function numericFields(experiments: Experiment[], fieldDefs: FieldDef[]): FieldDef[] {
+  return fieldDefs.filter((f) => f.type !== "image" && numericCount(experiments, f.key, 2) >= 2);
+}
+
+// Split a value-key back into its field key and optional variant id.
+export function parseKey(key: string): { fieldKey: string; variantId: string | null } {
+  const i = key.indexOf("::");
+  return i < 0
+    ? { fieldKey: key, variantId: null }
+    : { fieldKey: key.slice(0, i), variantId: key.slice(i + 2) };
+}
+
+export function keyField(
+  fieldDefs: FieldDef[],
+  key: string,
+): { field: FieldDef | null; variant: FieldVariant | null } {
+  const { fieldKey, variantId } = parseKey(key);
+  const field = fieldDefs.find((f) => f.key === fieldKey) ?? null;
+  const variant =
+    field && variantId ? ((field.variants ?? []).find((v) => v.id === variantId) ?? null) : null;
+  return { field, variant };
+}
+
+// The axis title for a value-key, e.g. "Depth (µm) [Min, Mo]".
+export function keyTitle(fieldDefs: FieldDef[], key: string): string {
+  const { field, variant } = keyField(fieldDefs, key);
+  return field ? variantLabel(field, variant) : key;
+}
+
+// Grouped axis options for the X/Y selects. A data point with specifier variants
+// becomes an <optgroup> containing its plain value plus each variant; a plain
+// data point is a single option. Only numeric-bearing data points are offered.
+export interface AxisFieldOptions {
+  field: FieldDef;
+  options: { key: string; label: string }[];
+}
+export function axisOptions(experiments: Experiment[], fieldDefs: FieldDef[]): AxisFieldOptions[] {
+  const out: AxisFieldOptions[] = [];
+  for (const f of fieldDefs) {
+    if (f.type === "image") continue;
+    const variants = f.variants ?? [];
+    // Offer the data point if the plain value or any single variant is numeric,
+    // so a field whose numbers live only under specifiers still appears.
+    const plottable =
+      numericCount(experiments, f.key, 2) >= 2 ||
+      variants.some((v) => numericCount(experiments, valueKey(f.key, v.id), 2) >= 2);
+    if (!plottable) continue;
+    const options = [
+      { key: f.key, label: variantLabel(f, null) },
+      ...variants.map((v) => ({ key: valueKey(f.key, v.id), label: variantLabel(f, v) })),
+    ];
+    out.push({ field: f, options });
+  }
+  return out;
 }
 
 // Fields worth offering as a constraint: anything non-image that has at least

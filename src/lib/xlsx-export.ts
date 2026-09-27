@@ -4,7 +4,15 @@
 
 import * as XLSX from "xlsx";
 import type { Experiment, Paper } from "./db";
-import { imageUrls, type FieldDef, type FieldValue, type GroupDef } from "./fields";
+import {
+  fieldColumnHeader,
+  imageUrls,
+  specsSuffix,
+  valueKey,
+  type FieldDef,
+  type FieldValue,
+  type GroupDef,
+} from "./fields";
 
 // A selectable paper-metadata column. `key` is either a top-level Paper column
 // or a key inside paper.meta (see metaValue).
@@ -88,8 +96,38 @@ function displayValue(v: FieldValue | undefined): string {
   return v.value == null ? "" : String(v.value);
 }
 
-function fieldHeader(f: FieldDef): string {
-  return f.unit ? `${f.label} (${f.unit})` : f.label;
+// One exported column: a data point's plain value, or one of its specifier
+// variants. `key` is the value-map key; `header` includes any specifier suffix.
+interface ExportColumn {
+  field: FieldDef;
+  key: string;
+  header: string;
+  groupId: string;
+  specs?: string[];
+}
+
+// Expand each data point into its plain column plus one column per specifier
+// variant, in group and definition order.
+function orderedColumnsOf(data: ExportData): ExportColumn[] {
+  return data.groups.flatMap((g) =>
+    data.fields
+      .filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY)
+      .flatMap((f) => {
+        const cols: ExportColumn[] = [
+          { field: f, key: f.key, header: fieldColumnHeader(f), groupId: f.group },
+        ];
+        for (const v of f.variants ?? []) {
+          cols.push({
+            field: f,
+            key: valueKey(f.key, v.id),
+            header: fieldColumnHeader(f, v.specs),
+            groupId: f.group,
+            specs: v.specs,
+          });
+        }
+        return cols;
+      }),
+  );
 }
 
 // Flat-cell text for one field. Image fields list every image URL (newline
@@ -101,16 +139,9 @@ function flatCell(f: FieldDef, v: FieldValue | undefined): string {
   return displayValue(v);
 }
 
-// Experiment data-point fields, excluding alloy_type (emitted as its own column).
-function orderedFieldsOf(data: ExportData): FieldDef[] {
-  return data.groups.flatMap((g) =>
-    data.fields.filter((f) => f.group === g.id && f.key !== ALLOY_TYPE_KEY),
-  );
-}
-
 export function downloadXlsx(data: ExportData, filename: string) {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const orderedFields = orderedFieldsOf(data);
+  const columns = orderedColumnsOf(data);
 
   // Row 1: group band. Row 2: column labels.
   const band: string[] = [];
@@ -124,9 +155,9 @@ export function downloadXlsx(data: ExportData, filename: string) {
     labels.push(c);
   });
   const groupLabelById = new Map(data.groups.map((g) => [g.id, g.label]));
-  orderedFields.forEach((f) => {
-    band.push(groupLabelById.get(f.group) ?? f.group);
-    labels.push(fieldHeader(f));
+  columns.forEach((col) => {
+    band.push(groupLabelById.get(col.groupId) ?? col.groupId);
+    labels.push(col.header);
   });
 
   const aoa: (string | number | null)[][] = [band, labels];
@@ -139,7 +170,7 @@ export function downloadXlsx(data: ExportData, filename: string) {
       alloyTypeOf(exp),
       exp.label,
     ];
-    for (const f of orderedFields) row.push(flatCell(f, exp.values?.[f.key]));
+    for (const col of columns) row.push(flatCell(col.field, exp.values?.[col.key]));
     aoa.push(row);
   }
 
@@ -171,13 +202,13 @@ function csvCell(s: unknown): string {
 
 export function buildCsv(data: ExportData): string {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const orderedFields = orderedFieldsOf(data);
+  const columns = orderedColumnsOf(data);
 
   const header = [
     ...data.meta.map((m) => m.label),
     "Alloy type",
     "Experiment",
-    ...orderedFields.map(fieldHeader),
+    ...columns.map((c) => c.header),
   ];
   const lines = [header.map(csvCell).join(",")];
   for (const exp of data.experiments) {
@@ -187,7 +218,7 @@ export function buildCsv(data: ExportData): string {
       ...data.meta.map((m) => metaValue(p, m.key)),
       alloyTypeOf(exp),
       exp.label,
-      ...orderedFields.map((f) => flatCell(f, exp.values?.[f.key])),
+      ...columns.map((c) => flatCell(c.field, exp.values?.[c.key])),
     ];
     lines.push(row.map(csvCell).join(","));
   }
@@ -235,7 +266,7 @@ function esc(s: unknown): string {
 
 export function buildReportHtml(data: ExportData): string {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
-  const orderedFields = orderedFieldsOf(data);
+  const columns = orderedColumnsOf(data);
 
   // Group experiments by their alloy type. One experiment belongs to exactly one
   // group (a paper's experiments can span several alloy types).
@@ -279,14 +310,16 @@ export function buildReportHtml(data: ExportData): string {
       }
       body += `<table><caption>${esc(e.label)}</caption><tbody>`;
       for (const g of data.groups) {
-        const fs = orderedFields.filter((f) => f.group === g.id);
+        const fs = columns.filter((c) => c.groupId === g.id);
         const cells = fs
-          .map((f) => {
-            const fv = e.values?.[f.key];
+          .map((c) => {
+            const f = c.field;
+            const th = f.label + (c.specs ? specsSuffix(c.specs) : "");
+            const fv = e.values?.[c.key];
             if (f.type === "image") {
               const srcs = fv && fv.state === "filled" ? imageUrls(fv) : [];
               return srcs.length
-                ? `<tr><th>${esc(f.label)}</th><td>${srcs
+                ? `<tr><th>${esc(th)}</th><td>${srcs
                     .map(
                       (src) =>
                         `<img src="${esc(src)}" style="max-height:200px;max-width:100%;margin:0 4px 4px 0"/>`,
@@ -295,7 +328,7 @@ export function buildReportHtml(data: ExportData): string {
                 : "";
             }
             const v = displayValue(fv);
-            return v ? `<tr><th>${esc(f.label)}</th><td>${esc(v)}</td></tr>` : "";
+            return v ? `<tr><th>${esc(th)}</th><td>${esc(v)}</td></tr>` : "";
           })
           .join("");
         if (cells) body += `<tr class="group"><td colspan="2">${esc(g.label)}</td></tr>${cells}`;

@@ -33,19 +33,20 @@ import type { Experiment, Paper } from "@/lib/db";
 import type { FieldDef } from "@/lib/fields";
 import {
   autoName,
+  axisOptions,
   citationIndex,
   clearedPlotState,
   constrainableFields,
   distinctValues,
-  fieldTitle,
   fmtNum,
   initialPlotState,
+  keyTitle,
   linearFit,
   makeId,
-  numericFields,
   POINT_SHAPES,
   seriesColor,
   seriesPoints,
+  type AxisFieldOptions,
   type Constraint,
   type PlotPoint,
   type PlotState,
@@ -96,7 +97,7 @@ export function PlotExplorer({
   // Whether the best-fit line colour picker is open.
   const [fitPickOpen, setFitPickOpen] = useState(false);
 
-  const numFields = useMemo(() => numericFields(experiments, fieldDefs), [experiments, fieldDefs]);
+  const axisOpts = useMemo(() => axisOptions(experiments, fieldDefs), [experiments, fieldDefs]);
   const filterFields = useMemo(
     () => constrainableFields(experiments, fieldDefs),
     [experiments, fieldDefs],
@@ -202,10 +203,10 @@ export function PlotExplorer({
     });
   };
 
-  const xField = fieldDefs.find((f) => f.key === state.xKey);
-  const yField = fieldDefs.find((f) => f.key === state.yKey);
-  const xTitle = state.xLabel ?? (xField ? fieldTitle(xField) : "X");
-  const yTitle = state.yLabel ?? (yField ? fieldTitle(yField) : "Y");
+  const xDefaultTitle = keyTitle(fieldDefs, state.xKey) || "X";
+  const yDefaultTitle = keyTitle(fieldDefs, state.yKey) || "Y";
+  const xTitle = state.xLabel ?? xDefaultTitle;
+  const yTitle = state.yLabel ?? yDefaultTitle;
 
   const removedSet = useMemo(() => new Set(state.removed), [state.removed]);
   const seriesData = useMemo(
@@ -362,14 +363,14 @@ export function PlotExplorer({
             <AxisSelect
               label="Y"
               value={state.yKey}
-              fields={numFields.length ? numFields : fieldDefs}
+              groups={axisOpts}
               onChange={(v) => patch({ yKey: v }, "Change Y field")}
             />
             <span className="text-xs text-muted-foreground">vs</span>
             <AxisSelect
               label="X"
               value={state.xKey}
-              fields={numFields.length ? numFields : fieldDefs}
+              groups={axisOpts}
               onChange={(v) => patch({ xKey: v }, "Change X field")}
             />
           </div>
@@ -627,7 +628,7 @@ export function PlotExplorer({
             axis="X"
             title="X axis"
             labelValue={state.xLabel}
-            labelPlaceholder={xField ? fieldTitle(xField) : "X"}
+            labelPlaceholder={xDefaultTitle}
             min={state.xMin}
             max={state.xMax}
             onLabel={(v) => live({ xLabel: v })}
@@ -641,7 +642,7 @@ export function PlotExplorer({
             axis="Y"
             title="Y axis"
             labelValue={state.yLabel}
-            labelPlaceholder={yField ? fieldTitle(yField) : "Y"}
+            labelPlaceholder={yDefaultTitle}
             min={state.yMin}
             max={state.yMax}
             onLabel={(v) => live({ yLabel: v })}
@@ -784,15 +785,18 @@ function PointMenu({
 }
 
 // ---- Axis field <select> ----
+// A data point with specifier variants is shown as an <optgroup> (a nested list
+// inside the dropdown) holding its plain value plus each variant; a plain data
+// point is a single option.
 function AxisSelect({
   label,
   value,
-  fields,
+  groups,
   onChange,
 }: {
   label: string;
   value: string;
-  fields: FieldDef[];
+  groups: AxisFieldOptions[];
   onChange: (v: string) => void;
 }) {
   return (
@@ -801,13 +805,23 @@ function AxisSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="max-w-[12rem] rounded border border-input bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none"
+        className="max-w-[13rem] rounded border border-input bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none"
       >
-        {fields.map((f) => (
-          <option key={f.key} value={f.key}>
-            {fieldTitle(f)}
-          </option>
-        ))}
+        {groups.map(({ field, options }) =>
+          options.length > 1 ? (
+            <optgroup key={field.key} label={options[0].label}>
+              {options.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
+          ) : (
+            <option key={field.key} value={options[0].key}>
+              {options[0].label}
+            </option>
+          ),
+        )}
       </select>
     </label>
   );

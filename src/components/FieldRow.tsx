@@ -20,6 +20,11 @@ interface Props {
   // Optional control (e.g. a per-row experiment selector) shown before the state
   // badge. Lets each data-point row indicate which experiment it displays.
   expControl?: ReactNode;
+  // Extra content under the label — the specifier chips or an "add specifier"
+  // button for a data point's variants.
+  labelExtra?: ReactNode;
+  // Tooltip for the delete button (defaults to the data-point delete wording).
+  deleteTitle?: string;
   // When true the field is shown empty and cannot be edited — used for an
   // "All experiments" row whose experiments hold differing values.
   readOnly?: boolean;
@@ -27,7 +32,16 @@ interface Props {
 
 const STATES: FieldState[] = ["filled", "missing", "na", "needs_check"];
 
-export function FieldRow({ field, value, onChange, onDelete, expControl, readOnly }: Props) {
+export function FieldRow({
+  field,
+  value,
+  onChange,
+  onDelete,
+  expControl,
+  labelExtra,
+  deleteTitle,
+  readOnly,
+}: Props) {
   const [local, setLocal] = useState<string>(
     value.value === null || value.value === undefined ? "" : String(value.value),
   );
@@ -73,14 +87,19 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
       {/* Experiment selector on the left of the data point. */}
       {expControl && <div className="pt-1 shrink-0">{expControl}</div>}
 
-      <FieldTooltip field={field}>
-        <div className="pt-1.5 w-16 @sm:w-20 shrink-0 text-xs leading-tight text-ink-muted cursor-help select-none break-words hyphens-auto">
-          {field.label}
-          {field.unit && (
-            <span className="ml-1 text-[10px] text-muted-foreground font-mono">({field.unit})</span>
-          )}
-        </div>
-      </FieldTooltip>
+      <div className="pt-1.5 w-16 @sm:w-20 shrink-0">
+        <FieldTooltip field={field}>
+          <div className="text-xs leading-tight text-ink-muted cursor-help select-none break-words hyphens-auto">
+            {field.label}
+            {field.unit && (
+              <span className="ml-1 text-[10px] text-muted-foreground font-mono">
+                ({field.unit})
+              </span>
+            )}
+          </div>
+        </FieldTooltip>
+        {labelExtra && <div className="mt-1">{labelExtra}</div>}
+      </div>
 
       <div className="flex flex-col gap-1 flex-1 min-w-0">
         {isNumber ? (
@@ -176,8 +195,8 @@ export function FieldRow({ field, value, onChange, onDelete, expControl, readOnl
         {onDelete && (
           <button
             onClick={onDelete}
-            title="Delete this data point (removes it from every experiment)"
-            aria-label={`Delete ${field.label}`}
+            title={deleteTitle ?? "Delete this data point (removes it from every experiment)"}
+            aria-label={deleteTitle ?? `Delete ${field.label}`}
             className="text-muted-foreground/40 hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 p-0.5"
           >
             <Trash2 className="h-3.5 w-3.5" />
