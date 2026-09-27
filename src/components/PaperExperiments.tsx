@@ -9,14 +9,18 @@ import {
   useUpdateExperiment,
 } from "@/lib/db";
 import {
+  canonicalizeSpecs,
   imageUrls,
   MISSING_VALUE,
   parseFieldInput,
+  specifierVocab,
   STATE_LABELS,
+  valueKey,
   withDefaults,
   type FieldDef,
   type FieldState,
   type FieldValue,
+  type FieldVariant,
 } from "@/lib/fields";
 import { useSettings } from "@/lib/settings";
 import { useHistory } from "@/lib/history";
@@ -338,7 +342,7 @@ export function PaperExperiments({
   activeExpId: string | null;
   onActiveExp: (id: string | null) => void;
 }) {
-  const { groups, fieldsByGroup, addField, deleteField } = useSettings();
+  const { groups, fieldsByGroup, addField, deleteField, addVariant, removeVariant } = useSettings();
   const { record } = useHistory();
   const updateExp = useUpdateExperiment();
   const createExp = useCreateExperiment();
@@ -992,6 +996,8 @@ export function PaperExperiments({
           onMarkGroup={markGroupBlanks}
           addField={addField}
           deleteField={deleteField}
+          addVariant={addVariant}
+          removeVariant={removeVariant}
         />
       ) : (
         <MultiView
@@ -1079,6 +1085,8 @@ function SingleView({
   onMarkGroup,
   addField,
   deleteField,
+  addVariant,
+  removeVariant,
 }: {
   paper: Paper;
   experiments: Experiment[];
@@ -1103,6 +1111,8 @@ function SingleView({
   onMarkGroup: (groupId: string, state: FieldState) => void;
   addField: (groupId: string) => void;
   deleteField: (key: string) => void;
+  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  removeVariant: (fieldKey: string, variantId: string) => void;
 }) {
   const baseIsExp = base !== ALL;
   const active = experiments[baseIndex];
@@ -1186,51 +1196,95 @@ function SingleView({
             </div>
             <div>
               {(fieldsByGroup[group.id] ?? []).map((f) => {
-                const row = resolveRow(f.key);
-                const selector = (
-                  <ExperimentSelect
-                    experiments={experiments}
-                    valueId={row.mode}
-                    onChange={(id) => setRowMode(f.key, id)}
-                    hasValue={(expId) => fieldFilled(expId, f.key)}
-                  />
-                );
-                const onDelete = () => {
-                  if (
-                    confirm(
-                      `Delete the "${f.label}" data point? It will be removed from every experiment.`,
-                    )
-                  )
-                    deleteField(f.key);
-                };
-                // Key by the resolved experiment so the editor always shows a
-                // fresh box for whichever experiment the row now points at —
-                // otherwise a cell can keep stale text after switching tabs
-                // (e.g. one that was edited and then cleared).
-                return f.type === "image" ? (
-                  <ImageFieldRow
-                    key={`${f.key}:${row.mode}`}
-                    field={f}
-                    value={row.value}
-                    paperId={paper.id}
-                    experimentId={row.imageExpId}
-                    paperName={paperName}
-                    experimentName={expNameById(row.imageExpId)}
-                    onChange={row.commit}
-                    onDelete={onDelete}
-                    expControl={selector}
-                    readOnly={row.readOnly}
-                  />
-                ) : (
-                  <FieldRow
-                    key={`${f.key}:${row.mode}`}
-                    field={f}
-                    value={row.value}
-                    onChange={row.commit}
-                    onDelete={onDelete}
-                    expControl={selector}
-                    readOnly={row.readOnly}
-                  />
+                // Rows for this data point: the plain value, then one per
+                // specifier variant. Each renders on its own value-key.
+                const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
+                  { key: f.key, variant: null },
+                  ...(f.type === "image"
+                    ? []
+                    : (f.variants ?? []).map((v) => ({ key: valueKey(f.key, v.id), variant: v }))),
+                ];
+                return (
+                  <Fragment key={f.key}>
+                    {rowSpecs.map(({ key: vkey, variant }) => {
+                      const row = resolveRow(vkey);
+                      const selector = (
+                        <ExperimentSelect
+                          experiments={experiments}
+                          valueId={row.mode}
+                          onChange={(id) => setRowMode(vkey, id)}
+                          hasValue={(expId) => fieldFilled(expId, vkey)}
+                        />
+                      );
+                      // The plain row's delete removes the whole data point; a
+                      // variant row's delete removes just that specifier column.
+                      const onDelete = variant
+                        ? () => {
+                            if (
+                              confirm(
+                                `Remove the "${f.label} [${variant.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                              )
+                            )
+                              removeVariant(f.key, variant.id);
+                          }
+                        : () => {
+                            if (
+                              confirm(
+                                `Delete the "${f.label}" data point? It will be removed from every experiment.`,
+                              )
+                            )
+                              deleteField(f.key);
+                          };
+                      const labelExtra =
+                        f.type === "image" ? undefined : variant ? (
+                          <span className="inline-flex flex-wrap gap-1">
+                            {variant.specs.map((s) => (
+                              <span
+                                key={s}
+                                className="rounded bg-copper/15 px-1 text-[9px] font-mono text-copper"
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </span>
+                        ) : (
+                          <SpecifierAdd field={f} onCreate={(specs) => addVariant(f.key, specs)} />
+                        );
+                      // Key by the resolved experiment so the editor always shows
+                      // a fresh box for whichever experiment the row points at.
+                      return f.type === "image" ? (
+                        <ImageFieldRow
+                          key={`${vkey}:${row.mode}`}
+                          field={f}
+                          value={row.value}
+                          paperId={paper.id}
+                          experimentId={row.imageExpId}
+                          paperName={paperName}
+                          experimentName={expNameById(row.imageExpId)}
+                          onChange={row.commit}
+                          onDelete={onDelete}
+                          expControl={selector}
+                          readOnly={row.readOnly}
+                        />
+                      ) : (
+                        <FieldRow
+                          key={`${vkey}:${row.mode}`}
+                          field={f}
+                          value={row.value}
+                          onChange={row.commit}
+                          onDelete={onDelete}
+                          expControl={selector}
+                          labelExtra={labelExtra}
+                          deleteTitle={
+                            variant
+                              ? "Remove this specifier variant (removes the column from every paper)"
+                              : undefined
+                          }
+                          readOnly={row.readOnly}
+                        />
+                      );
+                    })}
+                  </Fragment>
                 );
               })}
               {(fieldsByGroup[group.id] ?? []).length === 0 && (
@@ -1494,4 +1548,160 @@ function ExpGroupRows({
       ))}
     </>
   );
+}
+
+// ---- "Add specifier" control shown under a data point's plain row ----
+// Opens a small popover to pick from the data point's existing specifiers and/or
+// type new ones, then creates the variant (a new column across every paper).
+function SpecifierAdd({
+  field,
+  onCreate,
+}: {
+  field: FieldDef;
+  onCreate: (specs: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  const vocab = specifierVocab(field);
+  const canonical = canonicalizeSpecs(selected);
+  const alreadyExists =
+    canonical.length > 0 && !!field.variants?.some((v) => matchSpecs(v.specs, canonical));
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const toggle = (s: string) =>
+    setSelected((cur) =>
+      cur.some((x) => x.toLowerCase() === s.toLowerCase())
+        ? cur.filter((x) => x.toLowerCase() !== s.toLowerCase())
+        : [...cur, s],
+    );
+  const addTyped = () => {
+    const t = text.trim();
+    if (!t) return;
+    if (!selected.some((x) => x.toLowerCase() === t.toLowerCase())) setSelected((c) => [...c, t]);
+    setText("");
+  };
+  const create = () => {
+    if (canonical.length === 0) return;
+    onCreate(canonical);
+    setSelected([]);
+    setText("");
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Add a specifier variant of this data point"
+        className="inline-flex items-center gap-0.5 rounded border border-dashed border-rule px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-accent hover:text-foreground"
+      >
+        <Plus className="h-2.5 w-2.5" /> spec
+      </button>
+      {open && (
+        <div className="absolute left-0 top-6 z-30 w-56 rounded-md border border-rule bg-card p-2 shadow-lg">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+            {field.label} specifiers
+          </div>
+          {vocab.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1">
+              {vocab.map((s) => {
+                const on = selected.some((x) => x.toLowerCase() === s.toLowerCase());
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => toggle(s)}
+                    className={
+                      "rounded-full border px-1.5 py-0.5 text-[10px] transition-colors " +
+                      (on
+                        ? "border-copper/50 bg-copper/15 text-copper"
+                        : "border-rule text-muted-foreground hover:bg-accent")
+                    }
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <div className="mb-2 flex items-center gap-1">
+            <input
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addTyped();
+                }
+              }}
+              placeholder="New specifier (e.g. Mo)"
+              className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-1 text-[11px] focus:border-primary focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={addTyped}
+              disabled={!text.trim()}
+              className="rounded border border-rule px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-accent disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+          {canonical.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
+              <span className="text-muted-foreground">Variant:</span>
+              {canonical.map((s) => (
+                <span
+                  key={s}
+                  className="inline-flex items-center gap-0.5 rounded-full bg-copper/15 px-1.5 py-0.5 font-mono text-copper"
+                >
+                  {s}
+                  <button type="button" onClick={() => toggle(s)} aria-label={`Remove ${s}`}>
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {alreadyExists && (
+            <p className="mb-1 text-[10px] italic text-muted-foreground">
+              This variant already exists — it'll be reused.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={create}
+            disabled={canonical.length === 0}
+            className="w-full rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground disabled:opacity-40"
+          >
+            {alreadyExists ? "Show variant" : "Create variant"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Case-insensitive, order-independent equality of two canonical specifier sets.
+function matchSpecs(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const al = a.map((s) => s.toLowerCase()).sort();
+  const bl = b.map((s) => s.toLowerCase()).sort();
+  return al.every((s, i) => s === bl[i]);
 }

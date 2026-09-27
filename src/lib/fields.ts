@@ -19,6 +19,16 @@ export interface GroupDef {
   label: string;
 }
 
+// A "specifier variant" of a data point: the same measurement qualified by one
+// or more specifiers (prefixes), e.g. Depth with specifiers [Min, Mo]. Each
+// unique specifier set is its own column across every paper. `specs` is stored
+// canonically (sorted alphabetically, deduped), and `id` is stable so values
+// keyed to it survive a specifier rename.
+export interface FieldVariant {
+  id: string;
+  specs: string[];
+}
+
 export interface FieldDef {
   key: string;
   label: string;
@@ -27,6 +37,8 @@ export interface FieldDef {
   unit?: string;
   definition: string;
   options?: string[]; // suggested values (free-text fallback for select)
+  // Specifier variants defined for this data point (per-data-point vocabulary).
+  variants?: FieldVariant[];
 }
 
 export interface Schema {
@@ -349,4 +361,77 @@ export function parseFieldInput(raw: string, field: FieldDef, prev: FieldValue):
         ? "filled"
         : prev.state;
   return { ...prev, value: parsed, state: nextState };
+}
+
+// ---- Specifier variants ----
+// A data point can be split into variants by "specifiers" (prefixes). Each
+// unique set of specifiers is its own column across every paper.
+
+export function makeVariantId(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return `v_${crypto.randomUUID()}`;
+  return `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Trim, drop blanks, dedupe case-insensitively (keeping first-seen casing), and
+// sort alphabetically. This is the canonical form used for identity and display,
+// so [Mo, Min] and [min, mo] both become [Min, Mo].
+export function canonicalizeSpecs(specs: string[]): string[] {
+  const seen = new Map<string, string>();
+  for (const s of specs) {
+    const t = s.trim();
+    if (!t) continue;
+    const lc = t.toLowerCase();
+    if (!seen.has(lc)) seen.set(lc, t);
+  }
+  return [...seen.values()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+}
+
+// A stable equality key for a specifier set (case-insensitive, order-independent).
+export function specsKey(specs: string[]): string {
+  return canonicalizeSpecs(specs)
+    .map((s) => s.toLowerCase())
+    .join("\u0001");
+}
+
+// The value-map key for a data point's plain value (variantId absent) or one of
+// its variants. Plain keys are just the field key, so existing data is
+// unchanged.
+export function valueKey(fieldKey: string, variantId?: string | null): string {
+  return variantId ? `${fieldKey}::${variantId}` : fieldKey;
+}
+
+// The specifiers available to reuse on a data point: the union of all specifiers
+// across its variants, sorted.
+export function specifierVocab(field: FieldDef): string[] {
+  const seen = new Map<string, string>();
+  for (const v of field.variants ?? []) {
+    for (const s of v.specs) {
+      const lc = s.toLowerCase();
+      if (!seen.has(lc)) seen.set(lc, s);
+    }
+  }
+  return [...seen.values()].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+}
+
+export function findVariant(field: FieldDef, specs: string[]): FieldVariant | undefined {
+  const k = specsKey(specs);
+  return (field.variants ?? []).find((v) => specsKey(v.specs) === k);
+}
+
+// The bracketed specifier suffix, e.g. " [Min, Mo]" (empty for the plain value).
+export function specsSuffix(specs: string[]): string {
+  const c = canonicalizeSpecs(specs);
+  return c.length ? ` [${c.join(", ")}]` : "";
+}
+
+// Export/column header, e.g. "Depth (µm) [Min, Mo]".
+export function fieldColumnHeader(field: FieldDef, specs?: string[]): string {
+  const base = field.unit ? `${field.label} (${field.unit})` : field.label;
+  return `${base}${specs ? specsSuffix(specs) : ""}`;
+}
+
+// A short label for a variant in dropdowns, e.g. "Depth [Min, Mo]" (plain → "Depth").
+export function variantLabel(field: FieldDef, variant?: FieldVariant | null): string {
+  const base = field.unit ? `${field.label} (${field.unit})` : field.label;
+  return variant && variant.specs.length ? `${base}${specsSuffix(variant.specs)}` : base;
 }

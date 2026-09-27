@@ -11,8 +11,11 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
 import { useRecord } from "./history";
 import {
+  canonicalizeSpecs,
   DEFAULT_SCHEMA,
   fieldsByGroup as computeFieldsByGroup,
+  findVariant,
+  makeVariantId,
   type FieldDef,
   type FieldType,
   type GroupDef,
@@ -51,6 +54,10 @@ interface SettingsCtx {
   addImportedFields: (fields: FieldDef[]) => void;
   updateField: (key: string, patch: Partial<FieldDef>) => void;
   deleteField: (key: string) => void;
+  // Specifier variants. addVariant returns the (new or existing) variant id, or
+  // null when `specs` is empty (which is just the plain value).
+  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  removeVariant: (fieldKey: string, variantId: string) => void;
   // Reorder a data point to sit just before another (drives the viewer order).
   moveField: (dragKey: string, overKey: string) => void;
 
@@ -318,6 +325,44 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       );
     };
 
+    const addVariant: SettingsCtx["addVariant"] = (fieldKey, rawSpecs) => {
+      const specs = canonicalizeSpecs(rawSpecs);
+      if (specs.length === 0) return null; // the plain value, nothing to create
+      const field = schema.fields.find((f) => f.key === fieldKey);
+      if (!field) return null;
+      // Reuse an existing variant with the same specifier set (no redundant
+      // columns for the same information).
+      const existing = findVariant(field, specs);
+      if (existing) return existing.id;
+      const id = makeVariantId();
+      commit(
+        {
+          ...schema,
+          fields: schema.fields.map((f) =>
+            f.key === fieldKey ? { ...f, variants: [...(f.variants ?? []), { id, specs }] } : f,
+          ),
+        },
+        `Add ${field.label} specifier [${specs.join(", ")}]`,
+      );
+      return id;
+    };
+
+    const removeVariant: SettingsCtx["removeVariant"] = (fieldKey, variantId) => {
+      const field = schema.fields.find((f) => f.key === fieldKey);
+      if (!field?.variants?.some((v) => v.id === variantId)) return;
+      commit(
+        {
+          ...schema,
+          fields: schema.fields.map((f) =>
+            f.key === fieldKey
+              ? { ...f, variants: (f.variants ?? []).filter((v) => v.id !== variantId) }
+              : f,
+          ),
+        },
+        `Remove ${field.label} specifier`,
+      );
+    };
+
     const moveField: SettingsCtx["moveField"] = (dragKey, overKey) => {
       if (dragKey === overKey) return;
       const fields = [...schema.fields];
@@ -375,6 +420,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       addImportedFields,
       updateField,
       deleteField,
+      addVariant,
+      removeVariant,
       moveField,
       addGroup,
       renameGroup,
