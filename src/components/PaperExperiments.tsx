@@ -3,14 +3,17 @@ import { createPortal } from "react-dom";
 import type { Experiment, Paper } from "@/lib/db";
 import {
   pdfPublicUrl,
+  useBulkUpdateExperiments,
   useCreateExperiment,
   useDeleteExperiment,
+  useExperiments,
   useRestorePaper,
   useTrashPaper,
   useUpdateExperiment,
 } from "@/lib/db";
 import {
   canonicalizeSpecs,
+  findVariant,
   imageUrls,
   MISSING_VALUE,
   parseFieldInput,
@@ -42,7 +45,6 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  ChevronRight,
   Circle,
   CheckCheck,
   Columns3,
@@ -55,6 +57,7 @@ import {
   Plus,
   RotateCcw,
   Rows3,
+  Tags,
   Trash2,
   X,
 } from "lucide-react";
@@ -349,8 +352,12 @@ export function PaperExperiments({
   const updateExp = useUpdateExperiment();
   const createExp = useCreateExperiment();
   const deleteExp = useDeleteExperiment();
+  const bulkUpdate = useBulkUpdateExperiments();
   const trashPaper = useTrashPaper();
   const restorePaper = useRestorePaper();
+  // Every experiment across all papers — used to auto-fill a new specifier with
+  // N/A everywhere, and to tally specifier usage in the overview.
+  const { data: allExperiments = [] } = useExperiments();
 
   // Trash flow: opening the dialog collects a note before confirming.
   const [trashOpen, setTrashOpen] = useState(false);
@@ -461,6 +468,32 @@ export function PaperExperiments({
   // Per-row overrides: which experiment (or ALL) each data point row applies to.
   const [rowExp, setRowExp] = useState<Record<string, string>>({});
   const setRowMode = (key: string, val: string) => setRowExp((r) => ({ ...r, [key]: val }));
+
+  // Specifier variants the user has opened for editing in THIS paper this
+  // session (keyed fieldKey → set of variant ids). A variant shows in the editor
+  // when it holds real content in this paper OR it's been activated here — so a
+  // newly-picked, still-empty combo appears while niche combos used only by other
+  // papers stay hidden. Reset when the paper changes.
+  const [activeVariants, setActiveVariants] = useState<Record<string, Set<string>>>({});
+  const [avPaper, setAvPaper] = useState(paper.id);
+  if (avPaper !== paper.id) {
+    setAvPaper(paper.id);
+    setActiveVariants({});
+  }
+  const activateVariant = (fieldKey: string, variantId: string) =>
+    setActiveVariants((m) => {
+      const s = new Set(m[fieldKey] ?? []);
+      s.add(variantId);
+      return { ...m, [fieldKey]: s };
+    });
+  const deactivateVariant = (fieldKey: string, variantId: string) =>
+    setActiveVariants((m) => {
+      const s = new Set(m[fieldKey] ?? []);
+      s.delete(variantId);
+      return { ...m, [fieldKey]: s };
+    });
+  // Whether the specifier overview dialog is open.
+  const [specOpen, setSpecOpen] = useState(false);
   // The tab (All, or a specific experiment) governs the whole panel, so clear
   // any per-row experiment overrides whenever the active tab changes. Reset
   // synchronously during render (not in an effect) so no row lingers on the
@@ -709,8 +742,57 @@ export function PaperExperiments({
   };
 
   // A cell "has info" once the user has entered a value — mass status actions
-  // never overwrite those.
+  // never overwrite those. N/A and Missing cells carry no value, so they don't
+  // count as info.
   const hasInfo = (v: FieldValue) => v.value != null && String(v.value).trim() !== "";
+
+  // Whether any of this paper's experiments hold real content for a value-key
+  // (a filled number/text, not a blank N/A or Missing cell).
+  const variantUsedHere = (key: string): boolean =>
+    experiments.some((e) => hasInfo(valueOf(e.id, key)));
+
+  // Which specifier variants to render for a data point in THIS paper: only the
+  // combos that hold content in one of the paper's experiments, plus any the
+  // user just opened via the picker. A freshly-created specifier is N/A across
+  // every experiment (see createVariant), so without this filter every niche
+  // combo would clutter every paper — here they stay hidden until used.
+  const shownVariants = (f: FieldDef): FieldVariant[] => {
+    if (f.type === "image") return [];
+    const vs = f.variants ?? [];
+    if (vs.length === 0) return [];
+    const act = activeVariants[f.key];
+    return vs.filter((v) => variantUsedHere(valueKey(f.key, v.id)) || act?.has(v.id));
+  };
+
+  // Auto-fill a value-key with N/A on every experiment that has no content there
+  // — across every paper, not just this one. Most specifiers are niche and don't
+  // apply to other experiments, so N/A is the sensible default; the user then
+  // overwrites the few that do apply. The current paper goes through the draft
+  // layer (live editor + autosave); other papers are written in one bulk update.
+  const fillVariantNA = (key: string) => {
+    const na = (): FieldValue => ({ value: null, state: "na" });
+    for (const e of experiments) {
+      if (!hasInfo(valueOf(e.id, key))) setField(e.id, key, na());
+    }
+    const updates: { id: string; values: Record<string, FieldValue> }[] = [];
+    for (const e of allExperiments) {
+      if (e.paper_id === paper.id) continue;
+      const cur = e.values ?? {};
+      if (hasInfo(cur[key])) continue;
+      updates.push({ id: e.id, values: { ...cur, [key]: na() } });
+    }
+    if (updates.length) bulkUpdate.mutate(updates);
+  };
+
+  // Create (or reuse) a specifier variant, open it for editing in this paper,
+  // and — when it's brand new — seed N/A across every experiment.
+  const createVariant = (field: FieldDef, specs: string[]) => {
+    const existed = !!findVariant(field, canonicalizeSpecs(specs));
+    const id = addVariant(field.key, specs);
+    if (!id) return;
+    activateVariant(field.key, id);
+    if (!existed) fillVariantNA(valueKey(field.key, id));
+  };
 
   // Single view: set every blank data point in a category (group) to N/A or
   // Missing for the current target — the focused experiment, or every
@@ -929,6 +1011,14 @@ export function PaperExperiments({
             Open paper
           </a>
         )}
+        <button
+          onClick={() => setSpecOpen(true)}
+          title="See the specifier combinations used in this paper and across all papers"
+          className="inline-flex items-center gap-1 rounded-md border border-rule px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent transition-colors shrink-0"
+        >
+          <Tags className="h-3.5 w-3.5" />
+          Specifiers
+        </button>
         {allowMulti && (
           <div className="inline-flex rounded-md border border-rule overflow-hidden shrink-0">
             {(
@@ -998,8 +1088,11 @@ export function PaperExperiments({
           onMarkGroup={markGroupBlanks}
           addField={addField}
           deleteField={deleteField}
-          addVariant={addVariant}
+          shownVariants={shownVariants}
+          createVariant={createVariant}
           removeVariant={removeVariant}
+          deactivateVariant={deactivateVariant}
+          variantUsedHere={variantUsedHere}
         />
       ) : (
         <MultiView
@@ -1017,8 +1110,11 @@ export function PaperExperiments({
           onFillRowNeedsCheck={fillRowNeedsCheck}
           scrollToExp={scrollToExp}
           paperName={paperName}
-          addVariant={addVariant}
+          shownVariants={shownVariants}
+          createVariant={createVariant}
           removeVariant={removeVariant}
+          deactivateVariant={deactivateVariant}
+          variantUsedHere={variantUsedHere}
         />
       )}
 
@@ -1066,6 +1162,18 @@ export function PaperExperiments({
           </div>
         </div>
       )}
+
+      {specOpen && (
+        <SpecifiersOverview
+          onClose={() => setSpecOpen(false)}
+          paperName={paperName}
+          orderedGroups={orderedGroups}
+          fieldsByGroup={fieldsByGroup}
+          paperExperiments={experiments}
+          allExperiments={allExperiments}
+          removeVariant={removeVariant}
+        />
+      )}
     </div>
   );
 }
@@ -1089,8 +1197,11 @@ function SingleView({
   onMarkGroup,
   addField,
   deleteField,
-  addVariant,
+  shownVariants,
+  createVariant,
   removeVariant,
+  deactivateVariant,
+  variantUsedHere,
 }: {
   paper: Paper;
   experiments: Experiment[];
@@ -1115,8 +1226,11 @@ function SingleView({
   onMarkGroup: (groupId: string, state: FieldState) => void;
   addField: (groupId: string) => void;
   deleteField: (key: string) => void;
-  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  shownVariants: (field: FieldDef) => FieldVariant[];
+  createVariant: (field: FieldDef, specs: string[]) => void;
   removeVariant: (fieldKey: string, variantId: string) => void;
+  deactivateVariant: (fieldKey: string, variantId: string) => void;
+  variantUsedHere: (key: string) => boolean;
 }) {
   const baseIsExp = base !== ALL;
   const active = experiments[baseIndex];
@@ -1124,17 +1238,6 @@ function SingleView({
   useEffect(() => {
     setLabel(active?.label ?? "");
   }, [base, active?.label]);
-
-  // Which data points have their specifier variants expanded. Collapsed by
-  // default so the view stays uncluttered; the chevron reveals the variants.
-  const [openVariants, setOpenVariants] = useState<Set<string>>(() => new Set());
-  const toggleVariants = (key: string) =>
-    setOpenVariants((s) => {
-      const n = new Set(s);
-      if (n.has(key)) n.delete(key);
-      else n.add(key);
-      return n;
-    });
 
   // Names for downloaded image filenames.
   const paperName = paperNameOf(paper);
@@ -1211,15 +1314,14 @@ function SingleView({
             </div>
             <div>
               {(fieldsByGroup[group.id] ?? []).map((f) => {
-                // Rows for this data point: the plain value, then one per
-                // specifier variant — but variants are hidden until expanded.
-                const variants = f.type === "image" ? [] : (f.variants ?? []);
-                const open = openVariants.has(f.key);
+                // Rows for this data point: the plain value, then one row per
+                // specifier variant that's actually used in this paper (or that
+                // the user just opened via the picker). Niche combos used only by
+                // other papers stay hidden.
+                const variants = shownVariants(f);
                 const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
                   { key: f.key, variant: null },
-                  ...(open
-                    ? variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v }))
-                    : []),
+                  ...variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v })),
                 ];
                 return (
                   <Fragment key={f.key}>
@@ -1233,17 +1335,21 @@ function SingleView({
                           hasValue={(expId) => fieldFilled(expId, vkey)}
                         />
                       );
-                      // The plain row's delete removes the whole data point; a
-                      // variant row's delete removes just that specifier column.
+                      // The plain row's delete removes the whole data point. A
+                      // variant row's delete: if it holds no content in this
+                      // paper it's just closed (hidden here, kept everywhere
+                      // else); if it does, removing it drops the column globally.
                       const onDelete = variant
-                        ? () => {
-                            if (
-                              confirm(
-                                `Remove the "${f.label} [${variant.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                        ? variantUsedHere(vkey)
+                          ? () => {
+                              if (
+                                confirm(
+                                  `Remove the "${f.label} [${variant.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                                )
                               )
-                            )
-                              removeVariant(f.key, variant.id);
-                          }
+                                removeVariant(f.key, variant.id);
+                            }
+                          : () => deactivateVariant(f.key, variant.id)
                         : () => {
                             if (
                               confirm(
@@ -1265,32 +1371,7 @@ function SingleView({
                             ))}
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1">
-                            {variants.length > 0 && (
-                              <button
-                                type="button"
-                                onClick={() => toggleVariants(f.key)}
-                                title={
-                                  open
-                                    ? "Hide specifier variants"
-                                    : `Show ${variants.length} specifier variant${variants.length === 1 ? "" : "s"}`
-                                }
-                                aria-expanded={open}
-                                className="inline-flex items-center gap-0.5 rounded px-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-                              >
-                                {open ? (
-                                  <ChevronDown className="h-3 w-3" />
-                                ) : (
-                                  <ChevronRight className="h-3 w-3" />
-                                )}
-                                {variants.length}
-                              </button>
-                            )}
-                            <SpecifierAdd
-                              field={f}
-                              onCreate={(specs) => addVariant(f.key, specs)}
-                            />
-                          </span>
+                          <SpecifierAdd field={f} onCreate={(specs) => createVariant(f, specs)} />
                         );
                       // Key by the resolved experiment so the editor always shows
                       // a fresh box for whichever experiment the row points at.
@@ -1319,7 +1400,9 @@ function SingleView({
                           labelExtra={labelExtra}
                           deleteTitle={
                             variant
-                              ? "Remove this specifier variant (removes the column from every paper)"
+                              ? variantUsedHere(vkey)
+                                ? "Remove this specifier variant (removes the column from every paper)"
+                                : "Close this specifier here (kept in papers that use it)"
                               : undefined
                           }
                           readOnly={row.readOnly}
@@ -1367,8 +1450,11 @@ function MultiView({
   onFillRowNeedsCheck,
   scrollToExp,
   paperName,
-  addVariant,
+  shownVariants,
+  createVariant,
   removeVariant,
+  deactivateVariant,
+  variantUsedHere,
 }: {
   experiments: Experiment[];
   orderedGroups: { id: string; label: string }[];
@@ -1384,8 +1470,11 @@ function MultiView({
   onFillRowNeedsCheck: (key: string) => void;
   scrollToExp: { id: string; nonce: number };
   paperName: string;
-  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  shownVariants: (field: FieldDef) => FieldVariant[];
+  createVariant: (field: FieldDef, specs: string[]) => void;
   removeVariant: (fieldKey: string, variantId: string) => void;
+  deactivateVariant: (fieldKey: string, variantId: string) => void;
+  variantUsedHere: (key: string) => boolean;
 }) {
   const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1494,8 +1583,11 @@ function MultiView({
               onMarkRow={onMarkRow}
               onFillRowNeedsCheck={onFillRowNeedsCheck}
               paperName={paperName}
-              addVariant={addVariant}
+              shownVariants={shownVariants}
+              createVariant={createVariant}
               removeVariant={removeVariant}
+              deactivateVariant={deactivateVariant}
+              variantUsedHere={variantUsedHere}
             />
           ))}
         </tbody>
@@ -1541,8 +1633,11 @@ function ExpGroupRows({
   onMarkRow,
   onFillRowNeedsCheck,
   paperName,
-  addVariant,
+  shownVariants,
+  createVariant,
   removeVariant,
+  deactivateVariant,
+  variantUsedHere,
 }: {
   group: { id: string; label: string };
   fields: FieldDef[];
@@ -1552,18 +1647,12 @@ function ExpGroupRows({
   onMarkRow: (key: string, state: FieldState) => void;
   onFillRowNeedsCheck: (key: string) => void;
   paperName: string;
-  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  shownVariants: (field: FieldDef) => FieldVariant[];
+  createVariant: (field: FieldDef, specs: string[]) => void;
   removeVariant: (fieldKey: string, variantId: string) => void;
+  deactivateVariant: (fieldKey: string, variantId: string) => void;
+  variantUsedHere: (key: string) => boolean;
 }) {
-  // Specifier variants are collapsed by default; the chevron reveals them.
-  const [openVariants, setOpenVariants] = useState<Set<string>>(() => new Set());
-  const toggleVariants = (key: string) =>
-    setOpenVariants((s) => {
-      const n = new Set(s);
-      if (n.has(key)) n.delete(key);
-      else n.add(key);
-      return n;
-    });
   if (fields.length === 0) return null;
   return (
     <>
@@ -1576,13 +1665,13 @@ function ExpGroupRows({
         </td>
       </tr>
       {fields.flatMap((f) => {
-        // One row per value-key: the plain value, then each specifier variant —
-        // variants hidden until the data point is expanded.
-        const variants = f.type === "image" ? [] : (f.variants ?? []);
-        const open = openVariants.has(f.key);
+        // One row per value-key: the plain value, then one row per specifier
+        // variant used in this paper (or just opened via the picker). Niche
+        // combos used only by other papers stay hidden.
+        const variants = shownVariants(f);
         const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
           { key: f.key, variant: null },
-          ...(open ? variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v })) : []),
+          ...variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v })),
         ];
         return rowSpecs.map(({ key: vkey, variant }) => (
           <tr key={vkey} className="hover:bg-accent/30">
@@ -1612,14 +1701,24 @@ function ExpGroupRows({
                       <button
                         type="button"
                         onClick={() => {
-                          if (
-                            confirm(
-                              `Remove the "${f.label} [${variant.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                          // Holds content here → removing drops the column
+                          // everywhere (confirm). Otherwise just close it here.
+                          if (variantUsedHere(vkey)) {
+                            if (
+                              confirm(
+                                `Remove the "${f.label} [${variant.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                              )
                             )
-                          )
-                            removeVariant(f.key, variant.id);
+                              removeVariant(f.key, variant.id);
+                          } else {
+                            deactivateVariant(f.key, variant.id);
+                          }
                         }}
-                        title="Remove this specifier variant (removes the column from every paper)"
+                        title={
+                          variantUsedHere(vkey)
+                            ? "Remove this specifier variant (removes the column from every paper)"
+                            : "Close this specifier here (kept in papers that use it)"
+                        }
                         aria-label="Remove specifier variant"
                         className="text-muted-foreground/50 hover:text-destructive"
                       >
@@ -1629,27 +1728,7 @@ function ExpGroupRows({
                   ) : (
                     f.type !== "image" && (
                       <div className="mt-0.5 flex items-center gap-1">
-                        {variants.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => toggleVariants(f.key)}
-                            title={
-                              open
-                                ? "Hide specifier variants"
-                                : `Show ${variants.length} specifier variant${variants.length === 1 ? "" : "s"}`
-                            }
-                            aria-expanded={open}
-                            className="inline-flex items-center gap-0.5 rounded px-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-                          >
-                            {open ? (
-                              <ChevronDown className="h-3 w-3" />
-                            ) : (
-                              <ChevronRight className="h-3 w-3" />
-                            )}
-                            {variants.length}
-                          </button>
-                        )}
-                        <SpecifierAdd field={f} onCreate={(specs) => addVariant(f.key, specs)} />
+                        <SpecifierAdd field={f} onCreate={(specs) => createVariant(f, specs)} />
                       </div>
                     )
                   )}
@@ -1759,10 +1838,12 @@ function SpecifierAdd({
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Add a specifier variant of this data point"
+        title="Pick or create a specifier combination for this data point"
+        aria-expanded={open}
         className="inline-flex items-center gap-0.5 rounded border border-dashed border-rule px-1 py-0.5 text-[9px] text-muted-foreground hover:bg-accent hover:text-foreground"
       >
-        <Plus className="h-2.5 w-2.5" /> spec
+        <Plus className="h-2.5 w-2.5" /> specifier
+        <ChevronDown className={"h-2.5 w-2.5 transition-transform " + (open ? "rotate-180" : "")} />
       </button>
       {open &&
         typeof document !== "undefined" &&
@@ -1775,6 +1856,10 @@ function SpecifierAdd({
             <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
               {field.label} specifiers
             </div>
+            <p className="mb-2 text-[10px] leading-snug text-muted-foreground">
+              Tap specifiers to build a combination, or type a new one. New combinations start as
+              N/A on every experiment.
+            </p>
             {vocab.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1">
                 {vocab.map((s) => {
@@ -1861,4 +1946,177 @@ function matchSpecs(a: string[], b: string[]): boolean {
   const al = a.map((s) => s.toLowerCase()).sort();
   const bl = b.map((s) => s.toLowerCase()).sort();
   return al.every((s, i) => s === bl[i]);
+}
+
+// ---- Specifier overview dialog ----
+// Two scopes: the specifier combinations actually used in this paper, and every
+// combination that exists across all papers (with usage counts + a global
+// delete). "Used" means a combination holds real content in some experiment — a
+// combination that's only N/A everywhere is counted as unused.
+function SpecifiersOverview({
+  onClose,
+  paperName,
+  orderedGroups,
+  fieldsByGroup,
+  paperExperiments,
+  allExperiments,
+  removeVariant,
+}: {
+  onClose: () => void;
+  paperName: string;
+  orderedGroups: { id: string; label: string }[];
+  fieldsByGroup: Record<string, FieldDef[]>;
+  paperExperiments: Experiment[];
+  allExperiments: Experiment[];
+  removeVariant: (fieldKey: string, variantId: string) => void;
+}) {
+  const [scope, setScope] = useState<"paper" | "all">("paper");
+
+  const hasInfo = (v?: FieldValue) => !!v && v.value != null && String(v.value).trim() !== "";
+  const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
+
+  // How many experiments (and distinct papers) hold content for a value-key.
+  const usage = (key: string, exps: Experiment[]) => {
+    let experiments = 0;
+    const papers = new Set<string>();
+    for (const e of exps) {
+      if (hasInfo(e.values?.[key])) {
+        experiments++;
+        papers.add(e.paper_id);
+      }
+    }
+    return { experiments, papers: papers.size };
+  };
+
+  const sections = allFields
+    .map((f) => {
+      const variants = f.type === "image" ? [] : (f.variants ?? []);
+      const rows = variants
+        .map((v) => ({
+          v,
+          here: usage(valueKey(f.key, v.id), paperExperiments),
+          global: usage(valueKey(f.key, v.id), allExperiments),
+        }))
+        .filter((r) => (scope === "paper" ? r.here.experiments > 0 : true));
+      return { f, rows };
+    })
+    .filter((s) => s.rows.length > 0);
+
+  const plur = (n: number) => (n === 1 ? "" : "s");
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[80vh] w-full max-w-lg flex-col rounded-lg border border-rule bg-card shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 border-b border-rule px-5 py-3">
+          <Tags className="h-4 w-4 text-copper" />
+          <h3 className="text-lg font-serif italic">Specifier combinations</h3>
+          <button
+            onClick={onClose}
+            className="ml-auto text-muted-foreground hover:text-foreground"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 border-b border-rule px-5 py-2">
+          <div className="inline-flex rounded-md border border-rule overflow-hidden">
+            {(
+              [
+                ["paper", "In this paper"],
+                ["all", "All papers"],
+              ] as [typeof scope, string][]
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setScope(key)}
+                className={
+                  "px-2.5 py-1 text-xs transition-colors " +
+                  (scope === key
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className="ml-2 min-w-0 truncate text-[11px] text-muted-foreground">
+            {scope === "paper"
+              ? `Combinations used in ${paperName}`
+              : "Every combination created, with usage"}
+          </span>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+          {sections.length === 0 ? (
+            <p className="py-6 text-center text-sm italic text-muted-foreground">
+              {scope === "paper"
+                ? "No specifier combinations are used in this paper yet."
+                : "No specifier combinations have been created yet."}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {sections.map(({ f, rows }) => (
+                <section key={f.key}>
+                  <h4 className="mb-1.5 text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+                    {f.unit ? `${f.label} (${f.unit})` : f.label}
+                  </h4>
+                  <ul className="space-y-1">
+                    {rows.map(({ v, here, global }) => (
+                      <li
+                        key={v.id}
+                        className="flex items-center gap-2 rounded border border-rule/60 px-2 py-1.5"
+                      >
+                        <span className="flex min-w-0 flex-wrap items-center gap-1">
+                          {v.specs.map((s) => (
+                            <span
+                              key={s}
+                              className="rounded bg-copper/15 px-1 text-[10px] font-mono text-copper"
+                            >
+                              {s}
+                            </span>
+                          ))}
+                        </span>
+                        <span className="ml-auto shrink-0 text-right text-[11px] text-muted-foreground">
+                          {scope === "paper"
+                            ? `${here.experiments} experiment${plur(here.experiments)}`
+                            : global.experiments === 0
+                              ? "Not used yet"
+                              : `${global.experiments} experiment${plur(global.experiments)} · ${global.papers} paper${plur(global.papers)}`}
+                        </span>
+                        {scope === "all" && (
+                          <button
+                            onClick={() => {
+                              if (
+                                confirm(
+                                  `Remove the "${f.label} [${v.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                                )
+                              )
+                                removeVariant(f.key, v.id);
+                            }}
+                            title="Delete this combination everywhere"
+                            aria-label="Delete specifier combination"
+                            className="shrink-0 text-muted-foreground/50 hover:text-destructive"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
