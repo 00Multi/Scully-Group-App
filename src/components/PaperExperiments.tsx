@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Experiment, Paper } from "@/lib/db";
 import {
   pdfPublicUrl,
@@ -41,6 +42,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Circle,
   CheckCheck,
   Columns3,
@@ -1123,6 +1125,17 @@ function SingleView({
     setLabel(active?.label ?? "");
   }, [base, active?.label]);
 
+  // Which data points have their specifier variants expanded. Collapsed by
+  // default so the view stays uncluttered; the chevron reveals the variants.
+  const [openVariants, setOpenVariants] = useState<Set<string>>(() => new Set());
+  const toggleVariants = (key: string) =>
+    setOpenVariants((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+
   // Names for downloaded image filenames.
   const paperName = paperNameOf(paper);
   const expNameById = (id: string) => {
@@ -1199,12 +1212,14 @@ function SingleView({
             <div>
               {(fieldsByGroup[group.id] ?? []).map((f) => {
                 // Rows for this data point: the plain value, then one per
-                // specifier variant. Each renders on its own value-key.
+                // specifier variant — but variants are hidden until expanded.
+                const variants = f.type === "image" ? [] : (f.variants ?? []);
+                const open = openVariants.has(f.key);
                 const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
                   { key: f.key, variant: null },
-                  ...(f.type === "image"
-                    ? []
-                    : (f.variants ?? []).map((v) => ({ key: valueKey(f.key, v.id), variant: v }))),
+                  ...(open
+                    ? variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v }))
+                    : []),
                 ];
                 return (
                   <Fragment key={f.key}>
@@ -1250,7 +1265,32 @@ function SingleView({
                             ))}
                           </span>
                         ) : (
-                          <SpecifierAdd field={f} onCreate={(specs) => addVariant(f.key, specs)} />
+                          <span className="inline-flex items-center gap-1">
+                            {variants.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleVariants(f.key)}
+                                title={
+                                  open
+                                    ? "Hide specifier variants"
+                                    : `Show ${variants.length} specifier variant${variants.length === 1 ? "" : "s"}`
+                                }
+                                aria-expanded={open}
+                                className="inline-flex items-center gap-0.5 rounded px-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                              >
+                                {open ? (
+                                  <ChevronDown className="h-3 w-3" />
+                                ) : (
+                                  <ChevronRight className="h-3 w-3" />
+                                )}
+                                {variants.length}
+                              </button>
+                            )}
+                            <SpecifierAdd
+                              field={f}
+                              onCreate={(specs) => addVariant(f.key, specs)}
+                            />
+                          </span>
                         );
                       // Key by the resolved experiment so the editor always shows
                       // a fresh box for whichever experiment the row points at.
@@ -1515,6 +1555,15 @@ function ExpGroupRows({
   addVariant: (fieldKey: string, specs: string[]) => string | null;
   removeVariant: (fieldKey: string, variantId: string) => void;
 }) {
+  // Specifier variants are collapsed by default; the chevron reveals them.
+  const [openVariants, setOpenVariants] = useState<Set<string>>(() => new Set());
+  const toggleVariants = (key: string) =>
+    setOpenVariants((s) => {
+      const n = new Set(s);
+      if (n.has(key)) n.delete(key);
+      else n.add(key);
+      return n;
+    });
   if (fields.length === 0) return null;
   return (
     <>
@@ -1527,12 +1576,13 @@ function ExpGroupRows({
         </td>
       </tr>
       {fields.flatMap((f) => {
-        // One row per value-key: the plain value, then each specifier variant.
+        // One row per value-key: the plain value, then each specifier variant —
+        // variants hidden until the data point is expanded.
+        const variants = f.type === "image" ? [] : (f.variants ?? []);
+        const open = openVariants.has(f.key);
         const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
           { key: f.key, variant: null },
-          ...(f.type === "image"
-            ? []
-            : (f.variants ?? []).map((v) => ({ key: valueKey(f.key, v.id), variant: v }))),
+          ...(open ? variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v })) : []),
         ];
         return rowSpecs.map(({ key: vkey, variant }) => (
           <tr key={vkey} className="hover:bg-accent/30">
@@ -1578,7 +1628,27 @@ function ExpGroupRows({
                     </span>
                   ) : (
                     f.type !== "image" && (
-                      <div className="mt-0.5">
+                      <div className="mt-0.5 flex items-center gap-1">
+                        {variants.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleVariants(f.key)}
+                            title={
+                              open
+                                ? "Hide specifier variants"
+                                : `Show ${variants.length} specifier variant${variants.length === 1 ? "" : "s"}`
+                            }
+                            aria-expanded={open}
+                            className="inline-flex items-center gap-0.5 rounded px-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            {open ? (
+                              <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
+                            )}
+                            {variants.length}
+                          </button>
+                        )}
                         <SpecifierAdd field={f} onCreate={(specs) => addVariant(f.key, specs)} />
                       </div>
                     )
@@ -1622,24 +1692,44 @@ function SpecifierAdd({
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [text, setText] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  // The popover renders in a portal (so it's never clipped by sticky table
+  // cells or later rows), anchored under the trigger button.
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 
   const vocab = specifierVocab(field);
   const canonical = canonicalizeSpecs(selected);
   const alreadyExists =
     canonical.length > 0 && !!field.variants?.some((v) => matchSpecs(v.specs, canonical));
 
+  const place = () => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const width = 224; // w-56
+    const vw = typeof window !== "undefined" ? window.innerWidth : r.left + width;
+    setPos({ top: r.bottom + 4, left: Math.max(8, Math.min(r.left, vw - width - 8)) });
+  };
+
   useEffect(() => {
     if (!open) return;
+    place();
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t) || popRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    const onReposition = () => place();
     window.addEventListener("mousedown", onDown);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onReposition, true);
+    window.addEventListener("resize", onReposition);
     return () => {
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onReposition, true);
+      window.removeEventListener("resize", onReposition);
     };
   }, [open]);
 
@@ -1664,8 +1754,9 @@ function SpecifierAdd({
   };
 
   return (
-    <div className="relative" ref={ref}>
+    <span className="inline-block">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         title="Add a specifier variant of this data point"
@@ -1673,87 +1764,94 @@ function SpecifierAdd({
       >
         <Plus className="h-2.5 w-2.5" /> spec
       </button>
-      {open && (
-        <div className="absolute left-0 top-6 z-30 w-56 rounded-md border border-rule bg-card p-2 shadow-lg">
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-            {field.label} specifiers
-          </div>
-          {vocab.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1">
-              {vocab.map((s) => {
-                const on = selected.some((x) => x.toLowerCase() === s.toLowerCase());
-                return (
-                  <button
+      {open &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={popRef}
+            style={{ position: "fixed", top: pos.top, left: pos.left, zIndex: 60 }}
+            className="w-56 rounded-md border border-rule bg-card p-2 shadow-lg"
+          >
+            <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+              {field.label} specifiers
+            </div>
+            {vocab.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1">
+                {vocab.map((s) => {
+                  const on = selected.some((x) => x.toLowerCase() === s.toLowerCase());
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => toggle(s)}
+                      className={
+                        "rounded-full border px-1.5 py-0.5 text-[10px] transition-colors " +
+                        (on
+                          ? "border-copper/50 bg-copper/15 text-copper"
+                          : "border-rule text-muted-foreground hover:bg-accent")
+                      }
+                    >
+                      {s}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            <div className="mb-2 flex items-center gap-1">
+              <input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTyped();
+                  }
+                }}
+                placeholder="New specifier (e.g. Mo)"
+                className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-1 text-[11px] focus:border-primary focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={addTyped}
+                disabled={!text.trim()}
+                className="rounded border border-rule px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-accent disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+            {canonical.length > 0 && (
+              <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
+                <span className="text-muted-foreground">Variant:</span>
+                {canonical.map((s) => (
+                  <span
                     key={s}
-                    type="button"
-                    onClick={() => toggle(s)}
-                    className={
-                      "rounded-full border px-1.5 py-0.5 text-[10px] transition-colors " +
-                      (on
-                        ? "border-copper/50 bg-copper/15 text-copper"
-                        : "border-rule text-muted-foreground hover:bg-accent")
-                    }
+                    className="inline-flex items-center gap-0.5 rounded-full bg-copper/15 px-1.5 py-0.5 font-mono text-copper"
                   >
                     {s}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <div className="mb-2 flex items-center gap-1">
-            <input
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addTyped();
-                }
-              }}
-              placeholder="New specifier (e.g. Mo)"
-              className="min-w-0 flex-1 rounded border border-input bg-background px-1.5 py-1 text-[11px] focus:border-primary focus:outline-none"
-            />
+                    <button type="button" onClick={() => toggle(s)} aria-label={`Remove ${s}`}>
+                      <X className="h-2.5 w-2.5" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            {alreadyExists && (
+              <p className="mb-1 text-[10px] italic text-muted-foreground">
+                This variant already exists — it'll be reused.
+              </p>
+            )}
             <button
               type="button"
-              onClick={addTyped}
-              disabled={!text.trim()}
-              className="rounded border border-rule px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-accent disabled:opacity-40"
+              onClick={create}
+              disabled={canonical.length === 0}
+              className="w-full rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground disabled:opacity-40"
             >
-              Add
+              {alreadyExists ? "Show variant" : "Create variant"}
             </button>
-          </div>
-          {canonical.length > 0 && (
-            <div className="mb-2 flex flex-wrap items-center gap-1 text-[10px]">
-              <span className="text-muted-foreground">Variant:</span>
-              {canonical.map((s) => (
-                <span
-                  key={s}
-                  className="inline-flex items-center gap-0.5 rounded-full bg-copper/15 px-1.5 py-0.5 font-mono text-copper"
-                >
-                  {s}
-                  <button type="button" onClick={() => toggle(s)} aria-label={`Remove ${s}`}>
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-          {alreadyExists && (
-            <p className="mb-1 text-[10px] italic text-muted-foreground">
-              This variant already exists — it'll be reused.
-            </p>
-          )}
-          <button
-            type="button"
-            onClick={create}
-            disabled={canonical.length === 0}
-            className="w-full rounded bg-primary px-2 py-1 text-[11px] text-primary-foreground disabled:opacity-40"
-          >
-            {alreadyExists ? "Show variant" : "Create variant"}
-          </button>
-        </div>
-      )}
-    </div>
+          </div>,
+          document.body,
+        )}
+    </span>
   );
 }
 
