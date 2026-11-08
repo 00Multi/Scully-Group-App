@@ -76,10 +76,36 @@ export async function captureCardPng(
 
   const clone = svg.cloneNode(true) as SVGSVGElement;
   inlineComputedStyles(svg as SVGSVGElement, clone);
+
+  // The on-screen axis text is deliberately small; in a standalone exported
+  // image it reads as tiny. Enlarge the tick numbers and the axis-name labels on
+  // the clone only, so the copied/downloaded PNG stays legible in a doc or slide
+  // while the interactive chart is unchanged.
+  const scaleFont = (el: Element, factor: number) => {
+    const st = (el as SVGElement).style;
+    const px = parseFloat(st.fontSize);
+    if (Number.isFinite(px)) st.fontSize = `${(px * factor).toFixed(1)}px`;
+  };
+  clone
+    .querySelectorAll(
+      ".recharts-cartesian-axis-tick-value, .recharts-cartesian-axis-tick-value tspan",
+    )
+    .forEach((el) => scaleFont(el, 1.45));
+  clone
+    .querySelectorAll(".recharts-label, .recharts-label tspan")
+    .forEach((el) => scaleFont(el, 1.55));
+
+  // Pad the viewBox so the now-larger edge labels are never clipped by the SVG
+  // bounds (overflow visible keeps anything just outside on-canvas too).
+  const m = 20;
+  const imgW = w + m * 2;
+  const imgH = h + m * 2;
   clone.setAttribute("xmlns", SVG_NS);
-  clone.setAttribute("width", String(w));
-  clone.setAttribute("height", String(h));
-  if (!clone.getAttribute("viewBox")) clone.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  clone.setAttribute("overflow", "visible");
+  clone.style.overflow = "visible";
+  clone.setAttribute("width", String(imgW));
+  clone.setAttribute("height", String(imgH));
+  clone.setAttribute("viewBox", `${-m} ${-m} ${imgW} ${imgH}`);
 
   const svgStr = new XMLSerializer().serializeToString(clone);
   const img = await loadImage("data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgStr));
@@ -88,9 +114,9 @@ export async function captureCardPng(
   const bg = solidBackground(cardStyle.backgroundColor);
   const pad = 16;
   const title = opts.title?.trim();
-  const titleBand = title ? 26 : 0;
-  const cssW = w + pad * 2;
-  const cssH = h + pad * 2 + titleBand;
+  const titleBand = title ? 38 : 0;
+  const cssW = imgW + pad * 2;
+  const cssH = imgH + pad * 2 + titleBand;
 
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(cssW * scale);
@@ -104,12 +130,17 @@ export async function captureCardPng(
   if (title) {
     const h3 = card.querySelector("h3");
     const ts = h3 ? getComputedStyle(h3) : cardStyle;
-    ctx.fillStyle = ts.color || "#b87333";
-    ctx.font = `600 11px ${ts.fontFamily || "system-ui, sans-serif"}`;
+    // Keep the title readable: the card's own text colour (dark), falling back
+    // to a dark slate rather than the faint copper header colour.
+    const color = ts.color && ts.color !== "rgba(0, 0, 0, 0)" ? ts.color : "#1f2937";
+    ctx.fillStyle = color;
+    ctx.font = `700 18px ${ts.fontFamily || "system-ui, sans-serif"}`;
+    ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(title, pad, pad + titleBand / 2);
+    ctx.fillText(title, cssW / 2, pad + titleBand / 2);
+    ctx.textAlign = "start";
   }
-  ctx.drawImage(img, pad, pad + titleBand, w, h);
+  ctx.drawImage(img, pad, pad + titleBand, imgW, imgH);
 
   return await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("Export failed."))), "image/png"),
