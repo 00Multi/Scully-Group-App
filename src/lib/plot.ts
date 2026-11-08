@@ -282,6 +282,64 @@ export function linearFit(points: { x: number; y: number }[]): FitResult | null 
   return { slope, intercept, r, r2: r * r, n, x0, x1 };
 }
 
+// ---- Correlation ranking ----
+// Every pair of numeric data points (plain value or specifier variant), with the
+// Pearson correlation of the experiments that have both. Pairs of the same data
+// point (plain vs its own variant) are skipped — that isn't an X-vs-Y
+// relationship — and pairs with fewer than `minN` shared points are dropped
+// since a two-point "fit" is always ±1.
+export interface PairCorrelation {
+  xKey: string;
+  yKey: string;
+  xLabel: string;
+  yLabel: string;
+  r: number;
+  r2: number;
+  n: number;
+}
+
+export function rankedCorrelations(
+  experiments: Experiment[],
+  fieldDefs: FieldDef[],
+  minN = 3,
+): PairCorrelation[] {
+  // All numeric axis keys (plain values and variants that actually carry data).
+  const keys: { key: string; label: string }[] = [];
+  for (const g of axisOptions(experiments, fieldDefs)) {
+    for (const o of g.options) {
+      if (numericCount(experiments, o.key, 2) >= 2) keys.push(o);
+    }
+  }
+  const out: PairCorrelation[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    for (let j = i + 1; j < keys.length; j++) {
+      const a = keys[i];
+      const b = keys[j];
+      if (parseKey(a.key).fieldKey === parseKey(b.key).fieldKey) continue;
+      const pts: { x: number; y: number }[] = [];
+      for (const e of experiments) {
+        const x = toNumber(e.values?.[a.key]?.value);
+        const y = toNumber(e.values?.[b.key]?.value);
+        if (x == null || y == null) continue;
+        pts.push({ x, y });
+      }
+      if (pts.length < minN) continue;
+      const fit = linearFit(pts);
+      if (!fit) continue;
+      out.push({
+        xKey: a.key,
+        yKey: b.key,
+        xLabel: a.label,
+        yLabel: b.label,
+        r: fit.r,
+        r2: fit.r2,
+        n: fit.n,
+      });
+    }
+  }
+  return out;
+}
+
 // Compact human-readable number: fixed for everyday magnitudes, scientific for
 // very large or very small ones.
 export function fmtNum(v: number): string {

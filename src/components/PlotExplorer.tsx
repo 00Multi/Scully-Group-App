@@ -56,6 +56,7 @@ import { PALETTES, type PaletteName } from "@/lib/palettes";
 import { useHistory } from "@/lib/history";
 import { canCopyImages, captureCardPng, copyPngToClipboard } from "@/lib/chartImage";
 import { downloadBlob, sanitizeFilename } from "@/lib/download";
+import { CorrelationPanel } from "./CorrelationPanel";
 
 const STORAGE_KEY = "plot.state.v1";
 
@@ -355,379 +356,395 @@ export function PlotExplorer({
     "rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50";
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-      {/* ---- Chart card ---- */}
-      <div ref={cardRef} className="rounded-lg border border-rule bg-card p-4">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <AxisSelect
-              label="Y"
-              value={state.yKey}
-              groups={axisOpts}
-              onChange={(v) => patch({ yKey: v }, "Change Y field")}
-            />
-            <span className="text-xs text-muted-foreground">vs</span>
-            <AxisSelect
-              label="X"
-              value={state.xKey}
-              groups={axisOpts}
-              onChange={(v) => patch({ xKey: v }, "Change X field")}
-            />
-          </div>
-          <div className="flex items-center gap-1">
-            {canCopyImages() && (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        {/* ---- Chart card ---- */}
+        <div ref={cardRef} className="rounded-lg border border-rule bg-card p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <AxisSelect
+                label="Y"
+                value={state.yKey}
+                groups={axisOpts}
+                onChange={(v) => patch({ yKey: v }, "Change Y field")}
+              />
+              <span className="text-xs text-muted-foreground">vs</span>
+              <AxisSelect
+                label="X"
+                value={state.xKey}
+                groups={axisOpts}
+                onChange={(v) => patch({ xKey: v }, "Change X field")}
+              />
+            </div>
+            <div className="flex items-center gap-1">
+              {canCopyImages() && (
+                <button
+                  type="button"
+                  onClick={() => exportPng("copy")}
+                  disabled={busy !== null}
+                  title="Copy chart to clipboard"
+                  aria-label="Copy chart to clipboard"
+                  className={iconBtn}
+                >
+                  {busy === "copy" ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : copied ? (
+                    <Check className="h-3.5 w-3.5 text-state-filled" />
+                  ) : (
+                    <Clipboard className="h-3.5 w-3.5" />
+                  )}
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => exportPng("copy")}
+                onClick={() => exportPng("download")}
                 disabled={busy !== null}
-                title="Copy chart to clipboard"
-                aria-label="Copy chart to clipboard"
+                title="Download chart as PNG"
+                aria-label="Download chart as PNG"
                 className={iconBtn}
               >
-                {busy === "copy" ? (
+                {busy === "download" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : copied ? (
-                  <Check className="h-3.5 w-3.5 text-state-filled" />
                 ) : (
-                  <Clipboard className="h-3.5 w-3.5" />
+                  <Download className="h-3.5 w-3.5" />
                 )}
               </button>
+            </div>
+          </div>
+
+          {err && <p className="mb-2 text-[10px] text-destructive">{err}</p>}
+
+          <div className="mb-1 text-[10px] text-muted-foreground">
+            {totalPoints} point{totalPoints === 1 ? "" : "s"} · one per experiment with both values
+            · click a point to delete it or edit it in Browse
+          </div>
+
+          <div
+            style={{ width: "100%", height: 460 }}
+            onClickCapture={(e) => {
+              clickPos.current = { x: e.clientX, y: e.clientY };
+            }}
+          >
+            {mounted && (
+              <ResponsiveContainer width="100%" height="100%">
+                <ScatterChart margin={{ top: 10, right: 20, left: 12, bottom: 28 }}>
+                  {state.showGrid && (
+                    <CartesianGrid stroke="currentColor" className="text-rule/40" />
+                  )}
+                  <XAxis
+                    type="number"
+                    dataKey="x"
+                    name={xTitle}
+                    domain={xDomain}
+                    allowDataOverflow={clipX}
+                    tick={{ fontSize: 10, fill: "currentColor" }}
+                    stroke="currentColor"
+                    className="text-muted-foreground"
+                    height={46}
+                    tickMargin={6}
+                    label={{
+                      value: xTitle,
+                      position: "insideBottom",
+                      offset: 4,
+                      style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" },
+                    }}
+                  />
+                  <YAxis
+                    type="number"
+                    dataKey="y"
+                    name={yTitle}
+                    domain={yDomain}
+                    allowDataOverflow={clipY}
+                    tick={{ fontSize: 10, fill: "currentColor" }}
+                    stroke="currentColor"
+                    className="text-muted-foreground"
+                    width={64}
+                    tickMargin={4}
+                    label={{
+                      value: yTitle,
+                      angle: -90,
+                      position: "insideLeft",
+                      style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" },
+                    }}
+                  />
+                  <ZAxis type="number" range={[46, 46]} />
+                  <RTooltip content={<PlotTooltip xTitle={xTitle} yTitle={yTitle} />} />
+                  {visibleCount > 1 && (
+                    <Legend
+                      verticalAlign="bottom"
+                      height={24}
+                      wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
+                    />
+                  )}
+                  {seriesData
+                    .filter(({ series }) => !series.hidden)
+                    .map(({ series, color, shape, points }) => (
+                      <Scatter
+                        key={series.id}
+                        name={series.name}
+                        data={points}
+                        fill={color}
+                        line={state.connect ? { stroke: color, strokeWidth: 2 } : false}
+                        lineJointType="linear"
+                        shape={shape}
+                        legendType={shape}
+                        isAnimationActive={false}
+                        onClick={(node: { payload?: PlotPoint }) => openPointMenu(node?.payload)}
+                        style={{ cursor: "pointer" }}
+                      />
+                    ))}
+                  {state.bestFit &&
+                    fits.map(({ id, color, fit }) =>
+                      fit ? (
+                        <ReferenceLine
+                          key={`fit-${id}`}
+                          ifOverflow="hidden"
+                          stroke={color}
+                          strokeWidth={2}
+                          strokeDasharray="6 4"
+                          segment={[
+                            { x: fit.x0, y: fit.slope * fit.x0 + fit.intercept },
+                            { x: fit.x1, y: fit.slope * fit.x1 + fit.intercept },
+                          ]}
+                        />
+                      ) : null,
+                    )}
+                </ScatterChart>
+              </ResponsiveContainer>
             )}
+          </div>
+
+          {/* ---- Best-fit slope / correlation readout ---- */}
+          {state.bestFit && fits.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-rule/70 bg-muted/20 px-3 py-1.5 text-[11px]">
+              <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <TrendingUp className="h-3 w-3" /> Best fit
+              </span>
+              {fits.map(({ id, name, color, fit }) => (
+                <span key={id} className="inline-flex items-center gap-1.5">
+                  <span
+                    className="inline-block h-0.5 w-4 rounded"
+                    style={{ backgroundColor: color }}
+                    aria-hidden
+                  />
+                  <span className="text-muted-foreground">{name}:</span>
+                  {fit ? (
+                    <>
+                      slope <span className="font-mono text-foreground">{fmtNum(fit.slope)}</span>
+                      <span className="text-muted-foreground">·</span>r{" "}
+                      <span className="font-mono text-foreground">{fmtNum(fit.r)}</span>
+                      <span className="text-muted-foreground">·</span>
+                      R² <span className="font-mono text-foreground">{fmtNum(fit.r2)}</span>
+                    </>
+                  ) : (
+                    <span className="italic text-muted-foreground">too few points</span>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* ---- Toggles & palette ---- */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={() => exportPng("download")}
-              disabled={busy !== null}
-              title="Download chart as PNG"
-              aria-label="Download chart as PNG"
-              className={iconBtn}
+              className={toggle(state.showGrid)}
+              onClick={() => patch({ showGrid: !state.showGrid }, "Toggle grid")}
             >
-              {busy === "download" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
+              <Grid3x3 className="h-3.5 w-3.5" /> Grid
             </button>
-          </div>
-        </div>
-
-        {err && <p className="mb-2 text-[10px] text-destructive">{err}</p>}
-
-        <div className="mb-1 text-[10px] text-muted-foreground">
-          {totalPoints} point{totalPoints === 1 ? "" : "s"} · one per experiment with both values ·
-          click a point to delete it or edit it in Browse
-        </div>
-
-        <div
-          style={{ width: "100%", height: 460 }}
-          onClickCapture={(e) => {
-            clickPos.current = { x: e.clientX, y: e.clientY };
-          }}
-        >
-          {mounted && (
-            <ResponsiveContainer width="100%" height="100%">
-              <ScatterChart margin={{ top: 10, right: 20, left: 12, bottom: 28 }}>
-                {state.showGrid && <CartesianGrid stroke="currentColor" className="text-rule/40" />}
-                <XAxis
-                  type="number"
-                  dataKey="x"
-                  name={xTitle}
-                  domain={xDomain}
-                  allowDataOverflow={clipX}
-                  tick={{ fontSize: 10, fill: "currentColor" }}
-                  stroke="currentColor"
-                  className="text-muted-foreground"
-                  height={46}
-                  tickMargin={6}
-                  label={{
-                    value: xTitle,
-                    position: "insideBottom",
-                    offset: 4,
-                    style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" },
-                  }}
-                />
-                <YAxis
-                  type="number"
-                  dataKey="y"
-                  name={yTitle}
-                  domain={yDomain}
-                  allowDataOverflow={clipY}
-                  tick={{ fontSize: 10, fill: "currentColor" }}
-                  stroke="currentColor"
-                  className="text-muted-foreground"
-                  width={64}
-                  tickMargin={4}
-                  label={{
-                    value: yTitle,
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { fontSize: 11, fill: "currentColor", textAnchor: "middle" },
-                  }}
-                />
-                <ZAxis type="number" range={[46, 46]} />
-                <RTooltip content={<PlotTooltip xTitle={xTitle} yTitle={yTitle} />} />
-                {visibleCount > 1 && (
-                  <Legend
-                    verticalAlign="bottom"
-                    height={24}
-                    wrapperStyle={{ fontSize: 11, paddingTop: 4 }}
+            <button
+              type="button"
+              className={toggle(state.connect)}
+              onClick={() => patch({ connect: !state.connect }, "Toggle connect")}
+            >
+              <Spline className="h-3.5 w-3.5" /> Connect dots
+            </button>
+            <button
+              type="button"
+              className={toggle(state.varyShapes)}
+              onClick={() => patch({ varyShapes: !state.varyShapes }, "Toggle shapes")}
+            >
+              <Shapes className="h-3.5 w-3.5" /> Vary shapes
+            </button>
+            <button
+              type="button"
+              className={toggle(!!state.bestFit)}
+              onClick={() => patch({ bestFit: !state.bestFit }, "Toggle best fit")}
+              title="Draw a least-squares trend line for each visible series"
+            >
+              <TrendingUp className="h-3.5 w-3.5" /> Best fit
+            </button>
+            {state.bestFit && (
+              <div className="relative">
+                <button
+                  type="button"
+                  aria-label="Best-fit line colour"
+                  title={
+                    state.fitColor
+                      ? "Best-fit line colour"
+                      : "Best-fit line colour (auto: each series' colour)"
+                  }
+                  onClick={() => setFitPickOpen((o) => !o)}
+                  className="flex h-7 w-7 items-center justify-center rounded-md border border-rule shadow-sm"
+                  style={{ backgroundColor: state.fitColor ?? "transparent" }}
+                >
+                  {!state.fitColor && <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />}
+                </button>
+                {fitPickOpen && (
+                  <ColorPopover
+                    current={state.fitColor ?? null}
+                    onPick={(c) => {
+                      patch({ fitColor: c }, "Best-fit colour");
+                      setFitPickOpen(false);
+                    }}
+                    onClose={() => setFitPickOpen(false)}
                   />
                 )}
-                {seriesData
-                  .filter(({ series }) => !series.hidden)
-                  .map(({ series, color, shape, points }) => (
-                    <Scatter
-                      key={series.id}
-                      name={series.name}
-                      data={points}
-                      fill={color}
-                      line={state.connect ? { stroke: color, strokeWidth: 2 } : false}
-                      lineJointType="linear"
-                      shape={shape}
-                      legendType={shape}
-                      isAnimationActive={false}
-                      onClick={(node: { payload?: PlotPoint }) => openPointMenu(node?.payload)}
-                      style={{ cursor: "pointer" }}
-                    />
-                  ))}
-                {state.bestFit &&
-                  fits.map(({ id, color, fit }) =>
-                    fit ? (
-                      <ReferenceLine
-                        key={`fit-${id}`}
-                        ifOverflow="hidden"
-                        stroke={color}
-                        strokeWidth={2}
-                        strokeDasharray="6 4"
-                        segment={[
-                          { x: fit.x0, y: fit.slope * fit.x0 + fit.intercept },
-                          { x: fit.x1, y: fit.slope * fit.x1 + fit.intercept },
-                        ]}
-                      />
-                    ) : null,
-                  )}
-              </ScatterChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        {/* ---- Best-fit slope / correlation readout ---- */}
-        {state.bestFit && fits.length > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-rule/70 bg-muted/20 px-3 py-1.5 text-[11px]">
-            <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
-              <TrendingUp className="h-3 w-3" /> Best fit
-            </span>
-            {fits.map(({ id, name, color, fit }) => (
-              <span key={id} className="inline-flex items-center gap-1.5">
-                <span
-                  className="inline-block h-0.5 w-4 rounded"
-                  style={{ backgroundColor: color }}
-                  aria-hidden
-                />
-                <span className="text-muted-foreground">{name}:</span>
-                {fit ? (
-                  <>
-                    slope <span className="font-mono text-foreground">{fmtNum(fit.slope)}</span>
-                    <span className="text-muted-foreground">·</span>r{" "}
-                    <span className="font-mono text-foreground">{fmtNum(fit.r)}</span>
-                    <span className="text-muted-foreground">·</span>
-                    R² <span className="font-mono text-foreground">{fmtNum(fit.r2)}</span>
-                  </>
-                ) : (
-                  <span className="italic text-muted-foreground">too few points</span>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* ---- Toggles & palette ---- */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className={toggle(state.showGrid)}
-            onClick={() => patch({ showGrid: !state.showGrid }, "Toggle grid")}
-          >
-            <Grid3x3 className="h-3.5 w-3.5" /> Grid
-          </button>
-          <button
-            type="button"
-            className={toggle(state.connect)}
-            onClick={() => patch({ connect: !state.connect }, "Toggle connect")}
-          >
-            <Spline className="h-3.5 w-3.5" /> Connect dots
-          </button>
-          <button
-            type="button"
-            className={toggle(state.varyShapes)}
-            onClick={() => patch({ varyShapes: !state.varyShapes }, "Toggle shapes")}
-          >
-            <Shapes className="h-3.5 w-3.5" /> Vary shapes
-          </button>
-          <button
-            type="button"
-            className={toggle(!!state.bestFit)}
-            onClick={() => patch({ bestFit: !state.bestFit }, "Toggle best fit")}
-            title="Draw a least-squares trend line for each visible series"
-          >
-            <TrendingUp className="h-3.5 w-3.5" /> Best fit
-          </button>
-          {state.bestFit && (
-            <div className="relative">
-              <button
-                type="button"
-                aria-label="Best-fit line colour"
-                title={
-                  state.fitColor
-                    ? "Best-fit line colour"
-                    : "Best-fit line colour (auto: each series' colour)"
-                }
-                onClick={() => setFitPickOpen((o) => !o)}
-                className="flex h-7 w-7 items-center justify-center rounded-md border border-rule shadow-sm"
-                style={{ backgroundColor: state.fitColor ?? "transparent" }}
-              >
-                {!state.fitColor && <TrendingUp className="h-3.5 w-3.5 text-muted-foreground" />}
-              </button>
-              {fitPickOpen && (
-                <ColorPopover
-                  current={state.fitColor ?? null}
-                  onPick={(c) => {
-                    patch({ fitColor: c }, "Best-fit colour");
-                    setFitPickOpen(false);
-                  }}
-                  onClose={() => setFitPickOpen(false)}
-                />
-              )}
-            </div>
-          )}
-          <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-            Palette
-            <select
-              value={state.palette}
-              onChange={(e) => patch({ palette: e.target.value as PaletteName }, "Change palette")}
-              className="rounded border border-input bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none"
-              title="Colour gradient applied across all series (unless a series has a custom colour)"
-            >
-              {PALETTES.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </div>
-
-      {/* ---- Controls column ---- */}
-      <div className="flex flex-col gap-4">
-        {/* Axes */}
-        <div className="rounded-lg border border-rule bg-card p-4">
-          <h3 className="mb-3 text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
-            Axes
-          </h3>
-          <AxisControls
-            axis="X"
-            title="X axis"
-            labelValue={state.xLabel}
-            labelPlaceholder={xDefaultTitle}
-            min={state.xMin}
-            max={state.xMax}
-            onLabel={(v) => live({ xLabel: v })}
-            onMin={(v) => live({ xMin: v })}
-            onMax={(v) => live({ xMax: v })}
-            onFocus={beginEdit}
-            onBlur={endEdit}
-          />
-          <div className="my-3 h-px bg-rule/60" />
-          <AxisControls
-            axis="Y"
-            title="Y axis"
-            labelValue={state.yLabel}
-            labelPlaceholder={yDefaultTitle}
-            min={state.yMin}
-            max={state.yMax}
-            onLabel={(v) => live({ yLabel: v })}
-            onMin={(v) => live({ yMin: v })}
-            onMax={(v) => live({ yMax: v })}
-            onFocus={beginEdit}
-            onBlur={endEdit}
-          />
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Limits auto-fit the data when left blank. Renaming an axis changes only this plot.
-          </p>
-        </div>
-
-        {/* Series */}
-        <div className="rounded-lg border border-rule bg-card p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">Series</h3>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => (confirmReset ? doReset() : setConfirmReset(true))}
-                className={
-                  "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition-colors " +
-                  (confirmReset
-                    ? "border-destructive/60 bg-destructive/10 text-destructive"
-                    : "border-rule text-muted-foreground hover:bg-accent")
-                }
-                title="Start the plot over from scratch"
-              >
-                <RotateCcw className="h-3 w-3" /> {confirmReset ? "Sure?" : "Reset"}
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3">
-            {state.series.length === 0 && (
-              <p className="rounded-md border border-dashed border-rule p-3 text-center text-xs italic text-muted-foreground">
-                No series. Add one to plot data.
-              </p>
+              </div>
             )}
-            {state.series.map((s, i) => (
-              <SeriesRow
-                key={s.id}
-                series={s}
-                index={i}
-                count={seriesData[i]?.points.length ?? 0}
-                color={seriesData[i]?.color ?? "#b87333"}
-                fields={filterFields}
-                experiments={experiments}
-                fieldDefs={fieldDefs}
-                onChange={(next, label) => setSeries(s.id, next, label)}
-                onRemove={() => removeSeries(s.id)}
-                onBeginEdit={beginEdit}
-                onLiveName={(name) =>
-                  live({
-                    series: stateRef.current.series.map((x) =>
-                      x.id === s.id ? { ...x, name } : x,
-                    ),
-                  })
+            <label className="ml-auto inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              Palette
+              <select
+                value={state.palette}
+                onChange={(e) =>
+                  patch({ palette: e.target.value as PaletteName }, "Change palette")
                 }
-                onEndEdit={endEdit}
-              />
-            ))}
-            <button
-              type="button"
-              onClick={addSeries}
-              className="inline-flex items-center justify-center gap-1.5 rounded-md border border-dashed border-rule px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-            >
-              <Plus className="h-3.5 w-3.5" /> Add series
-            </button>
+                className="rounded border border-input bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none"
+                title="Colour gradient applied across all series (unless a series has a custom colour)"
+              >
+                {PALETTES.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
+
+        {/* ---- Controls column ---- */}
+        <div className="flex flex-col gap-4">
+          {/* Axes */}
+          <div className="rounded-lg border border-rule bg-card p-4">
+            <h3 className="mb-3 text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+              Axes
+            </h3>
+            <AxisControls
+              axis="X"
+              title="X axis"
+              labelValue={state.xLabel}
+              labelPlaceholder={xDefaultTitle}
+              min={state.xMin}
+              max={state.xMax}
+              onLabel={(v) => live({ xLabel: v })}
+              onMin={(v) => live({ xMin: v })}
+              onMax={(v) => live({ xMax: v })}
+              onFocus={beginEdit}
+              onBlur={endEdit}
+            />
+            <div className="my-3 h-px bg-rule/60" />
+            <AxisControls
+              axis="Y"
+              title="Y axis"
+              labelValue={state.yLabel}
+              labelPlaceholder={yDefaultTitle}
+              min={state.yMin}
+              max={state.yMax}
+              onLabel={(v) => live({ yLabel: v })}
+              onMin={(v) => live({ yMin: v })}
+              onMax={(v) => live({ yMax: v })}
+              onFocus={beginEdit}
+              onBlur={endEdit}
+            />
+            <p className="mt-2 text-[10px] text-muted-foreground">
+              Limits auto-fit the data when left blank. Renaming an axis changes only this plot.
+            </p>
+          </div>
+
+          {/* Series */}
+          <div className="rounded-lg border border-rule bg-card p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-[10px] uppercase tracking-[0.2em] text-copper font-mono">
+                Series
+              </h3>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => (confirmReset ? doReset() : setConfirmReset(true))}
+                  className={
+                    "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition-colors " +
+                    (confirmReset
+                      ? "border-destructive/60 bg-destructive/10 text-destructive"
+                      : "border-rule text-muted-foreground hover:bg-accent")
+                  }
+                  title="Start the plot over from scratch"
+                >
+                  <RotateCcw className="h-3 w-3" /> {confirmReset ? "Sure?" : "Reset"}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {state.series.length === 0 && (
+                <p className="rounded-md border border-dashed border-rule p-3 text-center text-xs italic text-muted-foreground">
+                  No series. Add one to plot data.
+                </p>
+              )}
+              {state.series.map((s, i) => (
+                <SeriesRow
+                  key={s.id}
+                  series={s}
+                  index={i}
+                  count={seriesData[i]?.points.length ?? 0}
+                  color={seriesData[i]?.color ?? "#b87333"}
+                  fields={filterFields}
+                  experiments={experiments}
+                  fieldDefs={fieldDefs}
+                  onChange={(next, label) => setSeries(s.id, next, label)}
+                  onRemove={() => removeSeries(s.id)}
+                  onBeginEdit={beginEdit}
+                  onLiveName={(name) =>
+                    live({
+                      series: stateRef.current.series.map((x) =>
+                        x.id === s.id ? { ...x, name } : x,
+                      ),
+                    })
+                  }
+                  onEndEdit={endEdit}
+                />
+              ))}
+              <button
+                type="button"
+                onClick={addSeries}
+                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-dashed border-rule px-3 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add series
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {menu && (
+          <PointMenu
+            menu={menu}
+            onClose={() => setMenu(null)}
+            onDelete={() => {
+              removePoint(menu.point.key);
+              setMenu(null);
+            }}
+            onEdit={() => editInBrowse(menu.point)}
+          />
+        )}
       </div>
 
-      {menu && (
-        <PointMenu
-          menu={menu}
-          onClose={() => setMenu(null)}
-          onDelete={() => {
-            removePoint(menu.point.key);
-            setMenu(null);
-          }}
-          onEdit={() => editInBrowse(menu.point)}
-        />
-      )}
+      <CorrelationPanel
+        experiments={experiments}
+        fieldDefs={fieldDefs}
+        activeX={state.xKey}
+        activeY={state.yKey}
+        onPick={(xKey, yKey) => patch({ xKey, yKey }, "Load correlation pair")}
+      />
     </div>
   );
 }
