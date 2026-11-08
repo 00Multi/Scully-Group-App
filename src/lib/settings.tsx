@@ -16,8 +16,10 @@ import {
   fieldsByGroup as computeFieldsByGroup,
   findVariant,
   makeVariantId,
+  specsKey,
   type FieldDef,
   type FieldType,
+  type FieldVariant,
   type GroupDef,
   type Schema,
 } from "./fields";
@@ -58,6 +60,9 @@ interface SettingsCtx {
   // null when `specs` is empty (which is just the plain value).
   addVariant: (fieldKey: string, specs: string[]) => string | null;
   removeVariant: (fieldKey: string, variantId: string) => void;
+  // Merge specifier variants discovered by the importer, keeping their ids so the
+  // imported values (keyed to those ids) line up. Existing variants are skipped.
+  addImportedVariants: (items: { fieldKey: string; variant: FieldVariant }[]) => void;
   // Reorder a data point to sit just before another (drives the viewer order).
   moveField: (dragKey: string, overKey: string) => void;
 
@@ -363,6 +368,33 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       );
     };
 
+    const addImportedVariants: SettingsCtx["addImportedVariants"] = (items) => {
+      if (!items.length) return;
+      // Bucket the requested variants by field, dropping any that already exist
+      // (same canonical specs) so a re-import doesn't duplicate a column.
+      const byField = new Map<string, FieldVariant[]>();
+      for (const { fieldKey, variant } of items) {
+        const field = schema.fields.find((f) => f.key === fieldKey);
+        if (!field) continue;
+        const have = [...(field.variants ?? []), ...(byField.get(fieldKey) ?? [])];
+        if (have.some((v) => specsKey(v.specs) === specsKey(variant.specs))) continue;
+        byField.set(fieldKey, [...(byField.get(fieldKey) ?? []), variant]);
+      }
+      if (byField.size === 0) return;
+      const added = [...byField.values()].reduce((n, vs) => n + vs.length, 0);
+      commit(
+        {
+          ...schema,
+          fields: schema.fields.map((f) =>
+            byField.has(f.key)
+              ? { ...f, variants: [...(f.variants ?? []), ...byField.get(f.key)!] }
+              : f,
+          ),
+        },
+        `Import ${added} specifier variant${added === 1 ? "" : "s"}`,
+      );
+    };
+
     const moveField: SettingsCtx["moveField"] = (dragKey, overKey) => {
       if (dragKey === overKey) return;
       const fields = [...schema.fields];
@@ -422,6 +454,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       deleteField,
       addVariant,
       removeVariant,
+      addImportedVariants,
       moveField,
       addGroup,
       renameGroup,

@@ -1015,6 +1015,8 @@ export function PaperExperiments({
           onFillRowNeedsCheck={fillRowNeedsCheck}
           scrollToExp={scrollToExp}
           paperName={paperName}
+          addVariant={addVariant}
+          removeVariant={removeVariant}
         />
       )}
 
@@ -1325,6 +1327,8 @@ function MultiView({
   onFillRowNeedsCheck,
   scrollToExp,
   paperName,
+  addVariant,
+  removeVariant,
 }: {
   experiments: Experiment[];
   orderedGroups: { id: string; label: string }[];
@@ -1340,6 +1344,8 @@ function MultiView({
   onFillRowNeedsCheck: (key: string) => void;
   scrollToExp: { id: string; nonce: number };
   paperName: string;
+  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  removeVariant: (fieldKey: string, variantId: string) => void;
 }) {
   const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1448,6 +1454,8 @@ function MultiView({
               onMarkRow={onMarkRow}
               onFillRowNeedsCheck={onFillRowNeedsCheck}
               paperName={paperName}
+              addVariant={addVariant}
+              removeVariant={removeVariant}
             />
           ))}
         </tbody>
@@ -1493,6 +1501,8 @@ function ExpGroupRows({
   onMarkRow,
   onFillRowNeedsCheck,
   paperName,
+  addVariant,
+  removeVariant,
 }: {
   group: { id: string; label: string };
   fields: FieldDef[];
@@ -1502,6 +1512,8 @@ function ExpGroupRows({
   onMarkRow: (key: string, state: FieldState) => void;
   onFillRowNeedsCheck: (key: string) => void;
   paperName: string;
+  addVariant: (fieldKey: string, specs: string[]) => string | null;
+  removeVariant: (fieldKey: string, variantId: string) => void;
 }) {
   if (fields.length === 0) return null;
   return (
@@ -1514,38 +1526,85 @@ function ExpGroupRows({
           {group.label}
         </td>
       </tr>
-      {fields.map((f) => (
-        <tr key={f.key} className="hover:bg-accent/30">
-          <td className="sticky left-0 z-10 bg-card px-4 py-1.5 align-top border-b border-rule/60">
-            <div className="flex items-start justify-between gap-1.5">
-              <FieldTooltip field={f}>
-                <span className="text-sm text-ink-muted cursor-help select-none break-words">
-                  {f.label}
-                  {f.unit && (
-                    <span className="ml-1 text-xs text-muted-foreground font-mono">({f.unit})</span>
+      {fields.flatMap((f) => {
+        // One row per value-key: the plain value, then each specifier variant.
+        const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
+          { key: f.key, variant: null },
+          ...(f.type === "image"
+            ? []
+            : (f.variants ?? []).map((v) => ({ key: valueKey(f.key, v.id), variant: v }))),
+        ];
+        return rowSpecs.map(({ key: vkey, variant }) => (
+          <tr key={vkey} className="hover:bg-accent/30">
+            <td className="sticky left-0 z-10 bg-card px-4 py-1.5 align-top border-b border-rule/60">
+              <div className="flex items-start justify-between gap-1.5">
+                <div className="min-w-0">
+                  <FieldTooltip field={f}>
+                    <span className="text-sm text-ink-muted cursor-help select-none break-words">
+                      {f.label}
+                      {f.unit && (
+                        <span className="ml-1 text-xs text-muted-foreground font-mono">
+                          ({f.unit})
+                        </span>
+                      )}
+                    </span>
+                  </FieldTooltip>
+                  {variant ? (
+                    <span className="mt-0.5 flex flex-wrap items-center gap-1">
+                      {variant.specs.map((s) => (
+                        <span
+                          key={s}
+                          className="rounded bg-copper/15 px-1 text-[9px] font-mono text-copper"
+                        >
+                          {s}
+                        </span>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            confirm(
+                              `Remove the "${f.label} [${variant.specs.join(", ")}]" specifier? It will be removed from every paper.`,
+                            )
+                          )
+                            removeVariant(f.key, variant.id);
+                        }}
+                        title="Remove this specifier variant (removes the column from every paper)"
+                        aria-label="Remove specifier variant"
+                        className="text-muted-foreground/50 hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ) : (
+                    f.type !== "image" && (
+                      <div className="mt-0.5">
+                        <SpecifierAdd field={f} onCreate={(specs) => addVariant(f.key, specs)} />
+                      </div>
+                    )
                   )}
-                </span>
-              </FieldTooltip>
-              <MassStatusMenu
-                label="Mark blank cells in this row"
-                onApply={(state) => onMarkRow(f.key, state)}
-                onFillNeedsCheck={() => onFillRowNeedsCheck(f.key)}
-              />
-            </div>
-          </td>
-          {experiments.map((e, i) => (
-            <td key={e.id} className="px-3 py-1.5 align-top border-b border-rule/60">
-              <MultiCell
-                field={f}
-                value={valueOf(e.id, f.key)}
-                onChange={(next) => setField(e.id, f.key, next)}
-                paperName={paperName}
-                experimentName={expName(e, i)}
-              />
+                </div>
+                <MassStatusMenu
+                  label="Mark blank cells in this row"
+                  onApply={(state) => onMarkRow(vkey, state)}
+                  onFillNeedsCheck={() => onFillRowNeedsCheck(vkey)}
+                />
+              </div>
             </td>
-          ))}
-        </tr>
-      ))}
+            {experiments.map((e, i) => (
+              <td key={e.id} className="px-3 py-1.5 align-top border-b border-rule/60">
+                <MultiCell
+                  field={f}
+                  value={valueOf(e.id, vkey)}
+                  onChange={(next) => setField(e.id, vkey, next)}
+                  paperName={paperName}
+                  experimentName={expName(e, i)}
+                />
+              </td>
+            ))}
+          </tr>
+        ));
+      })}
     </>
   );
 }
