@@ -1371,7 +1371,11 @@ function SingleView({
                             ))}
                           </span>
                         ) : (
-                          <SpecifierAdd field={f} onCreate={(specs) => createVariant(f, specs)} />
+                          <SpecifierAdd
+                            field={f}
+                            onCreate={(specs) => createVariant(f, specs)}
+                            openIds={new Set(variants.map((v) => v.id))}
+                          />
                         );
                       // Key by the resolved experiment so the editor always shows
                       // a fresh box for whichever experiment the row points at.
@@ -1728,7 +1732,11 @@ function ExpGroupRows({
                   ) : (
                     f.type !== "image" && (
                       <div className="mt-0.5 flex items-center gap-1">
-                        <SpecifierAdd field={f} onCreate={(specs) => createVariant(f, specs)} />
+                        <SpecifierAdd
+                          field={f}
+                          onCreate={(specs) => createVariant(f, specs)}
+                          openIds={new Set(variants.map((v) => v.id))}
+                        />
                       </div>
                     )
                   )}
@@ -1764,9 +1772,13 @@ function ExpGroupRows({
 function SpecifierAdd({
   field,
   onCreate,
+  openIds,
 }: {
   field: FieldDef;
   onCreate: (specs: string[]) => void;
+  // Variant ids currently shown in this paper, so existing combinations the
+  // paper already uses can be flagged.
+  openIds?: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
@@ -1856,10 +1868,51 @@ function SpecifierAdd({
             <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
               {field.label} specifiers
             </div>
-            <p className="mb-2 text-[10px] leading-snug text-muted-foreground">
-              Tap specifiers to build a combination, or type a new one. New combinations start as
-              N/A on every experiment.
-            </p>
+
+            {/* Every combination ever created for this data point (across all
+                papers). Click one to open its row here; a check marks the ones
+                this paper already shows. */}
+            {field.variants && field.variants.length > 0 ? (
+              <div className="mb-2">
+                <div className="mb-1 text-[10px] text-muted-foreground">
+                  Open an existing combination:
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {field.variants.map((v) => {
+                    const shown = openIds?.has(v.id);
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => {
+                          onCreate(v.specs);
+                          setOpen(false);
+                        }}
+                        title={shown ? "Already shown in this paper" : "Open this combination here"}
+                        className={
+                          "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-mono transition-colors " +
+                          (shown
+                            ? "border-copper/50 bg-copper/15 text-copper"
+                            : "border-rule text-muted-foreground hover:bg-accent")
+                        }
+                      >
+                        {v.specs.join(", ")}
+                        {shown && <Check className="h-2.5 w-2.5" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="mb-2 text-[10px] italic text-muted-foreground">
+                No specifier combinations yet.
+              </p>
+            )}
+
+            <div className="mb-1 border-t border-rule/60 pt-2 text-[10px] text-muted-foreground">
+              Build a new combination — tap specifiers or type one. New combinations start as N/A on
+              every experiment.
+            </div>
             {vocab.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1">
                 {vocab.map((s) => {
