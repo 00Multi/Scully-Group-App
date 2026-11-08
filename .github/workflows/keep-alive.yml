@@ -1,0 +1,58 @@
+name: Keep alive
+
+# Keeps the deployment and its Supabase project from going to sleep. Vercel
+# serves the site, but the data lives in a free-tier Supabase project that
+# pauses after a stretch of inactivity — which takes the whole app down. A
+# small daily request to the site and to the Supabase REST API counts as
+# activity and resets that timer.
+
+on:
+  schedule:
+    # Daily at 06:17 UTC (off the top of the hour so it isn't delayed by the
+    # scheduler's busiest minute). Scheduled runs only fire from the default
+    # branch, so this starts working once merged.
+    - cron: "17 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keep-alive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    env:
+      SITE_URL: https://scully-group-app.vercel.app
+      SUPABASE_URL: https://feyemnjxzrguktbthzzi.supabase.co
+      # Supabase publishable key — public by design (it ships in the client
+      # bundle and is gated by row-level security). A repo secret of the same
+      # name overrides it if you ever rotate the key.
+      SUPABASE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_ZB-HpxLrUcpIpi1lZguXNw_wukqZdvY' }}
+    steps:
+      - name: Ping site and Supabase
+        run: |
+          set -u
+          # Reachable if we get any HTTP response (2xx/3xx/4xx); retry on a
+          # 5xx or a connection failure (000).
+          ping() {
+            name="$1"; shift
+            for attempt in 1 2 3; do
+              code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 45 "$@" || echo 000)
+              echo "$name attempt $attempt -> HTTP $code"
+              case "$code" in 2*|3*|4*) return 0 ;; esac
+              sleep 10
+            done
+            return 1
+          }
+          ok=0
+          ping "site" "$SITE_URL/" && ok=1 || true
+          ping "supabase" -H "apikey: $SUPABASE_KEY" \
+            "$SUPABASE_URL/rest/v1/papers?select=id&limit=1" && ok=1 || true
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Both keep-alive pings failed"
+            exit 1
+          fi
+          echo "Keep-alive ping complete."
