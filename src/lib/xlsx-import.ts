@@ -13,7 +13,17 @@
 // are logged. See PRD §6 — ~90% automatic, 10% manual cleanup.
 
 import * as XLSX from "xlsx";
-import type { FieldDef, FieldState, FieldValue } from "./fields";
+import {
+  canonicalizeSpecs,
+  findVariant,
+  makeVariantId,
+  specsKey,
+  valueKey,
+  type FieldDef,
+  type FieldState,
+  type FieldValue,
+  type FieldVariant,
+} from "./fields";
 import type { ImportPaperInput } from "./db";
 
 export interface ImportResult {
@@ -21,7 +31,22 @@ export interface ImportResult {
   // Fields discovered in the spreadsheet that were not in the schema. The
   // import page registers these so the imported values are visible/editable.
   newFields: FieldDef[];
+  // Specifier variants discovered in column headers (e.g. "Depth [Min, Mo]")
+  // that aren't yet on their data point; the import page registers these too.
+  newVariants?: { fieldKey: string; variant: FieldVariant }[];
   log: string[];
+}
+
+// Split a trailing "[spec, spec]" specifier suffix off a column header, e.g.
+// "Depth (µm) [Min, Mo]" → base "Depth (µm)", specs ["Min", "Mo"].
+function splitHeaderSpecs(h: string): { base: string; specs: string[] } {
+  const m = h.match(/^(.*?)\s*\[([^\]]*)\]\s*$/);
+  if (!m) return { base: h.trim(), specs: [] };
+  const specs = m[2]
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return { base: m[1].trim(), specs };
 }
 
 // Fields whose cell may pack several conditions ("static vs flowing",
@@ -466,29 +491,52 @@ function parseCsv(text: string, fileName: string, fields: FieldDef[]): ImportRes
   const header = rows[0].map((h) => h.trim());
   const labelMap = buildLabelMap(fields);
   const takenKeys = new Set(fields.map((f) => f.key));
+  const newVariants: { fieldKey: string; variant: FieldVariant }[] = [];
 
-  type Col = { kind: "paper"; key: string } | { kind: "field"; field: FieldDef } | { kind: "skip" };
+  // Resolve a header's specifier set to a variant id on `field`, reusing an
+  // existing variant (or one already seen in this import) so no duplicate
+  // columns are created, else minting a new one to register.
+  const resolveVariantId = (field: FieldDef, specs: string[]): string => {
+    const canon = canonicalizeSpecs(specs);
+    const existing = findVariant(field, canon);
+    if (existing) return existing.id;
+    const seen = newVariants.find(
+      (nv) => nv.fieldKey === field.key && specsKey(nv.variant.specs) === specsKey(canon),
+    );
+    if (seen) return seen.variant.id;
+    const id = makeVariantId();
+    newVariants.push({ fieldKey: field.key, variant: { id, specs: canon } });
+    return id;
+  };
+
+  type Col =
+    | { kind: "paper"; key: string }
+    | { kind: "field"; field: FieldDef; writeKey: string }
+    | { kind: "skip" };
   const cols: Col[] = header.map((h) => {
-    const n = norm(h);
-    if (PAPER_COL[n]) return { kind: "paper", key: PAPER_COL[n] };
+    const { base, specs } = splitHeaderSpecs(h);
+    const n = norm(base);
+    // A paper-metadata column never carries a specifier suffix.
+    if (!specs.length && PAPER_COL[n]) return { kind: "paper", key: PAPER_COL[n] };
     if (!n) return { kind: "skip" };
     let f = labelMap.get(n);
     if (!f) {
-      let key = slugify(h) || "field";
+      let key = slugify(base) || "field";
       let i = 2;
-      while (takenKeys.has(key)) key = `${slugify(h) || "field"}_${i++}`;
+      while (takenKeys.has(key)) key = `${slugify(base) || "field"}_${i++}`;
       takenKeys.add(key);
       f = {
         key,
-        label: h,
+        label: base,
         group: "physical",
         type: "text",
-        definition: `Imported from CSV column "${h}".`,
+        definition: `Imported from CSV column "${base}".`,
       };
       newFields.push(f);
       labelMap.set(n, f);
     }
-    return { kind: "field", field: f };
+    const writeKey = specs.length ? valueKey(f.key, resolveVariantId(f, specs)) : f.key;
+    return { kind: "field", field: f, writeKey };
   });
 
   const paperIdx = (key: string) => cols.findIndex((c) => c.kind === "paper" && c.key === key);
@@ -539,7 +587,7 @@ function parseCsv(text: string, fileName: string, fields: FieldDef[]): ImportRes
     cols.forEach((c, i) => {
       if (c.kind !== "field") return;
       const raw = (row[i] ?? "").trim();
-      if (raw !== "") values[c.field.key] = toFieldValue(raw, c.field.type);
+      if (raw !== "") values[c.writeKey] = toFieldValue(raw, c.field.type);
     });
     const label = cell(row, idx.experiment) || `Experiment ${paper.experiments.length + 1}`;
     paper.experiments.push({ label, values });
@@ -555,7 +603,14 @@ function parseCsv(text: string, fileName: string, fields: FieldDef[]): ImportRes
       `Created ${newFields.length} new data point(s) from unmatched columns: ${newFields.map((f) => f.label).join(", ")}.`,
     );
   }
-  return { papers, newFields, log };
+  if (newVariants.length) {
+    log.push(
+      `Registered ${newVariants.length} specifier variant(s) from column headers: ${newVariants
+        .map((nv) => `[${nv.variant.specs.join(", ")}]`)
+        .join(", ")}.`,
+    );
+  }
+  return { papers, newFields, newVariants, log };
 }
 
 function parseJson(text: string, fileName: string, fields: FieldDef[]): ImportResult {

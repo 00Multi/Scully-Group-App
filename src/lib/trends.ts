@@ -3,7 +3,7 @@
 // list of {label, count} buckets and drawn as a bar chart.
 
 import type { Experiment, Paper } from "./db";
-import type { FieldDef, GroupDef } from "./fields";
+import { specsSuffix, valueKey, type FieldDef, type FieldVariant, type GroupDef } from "./fields";
 import { readInstitutionRefs, type Institution } from "./ror";
 import { readPaperCountries } from "./countries";
 import { groupByMember, groupByPaperId, type InstitutionGroup } from "./institutionGroups";
@@ -412,34 +412,31 @@ export function buildTrendSections(
     const trends: TrendSpec[] = [];
     for (const f of fieldDefs) {
       if (f.group !== g.id || f.type === "image") continue;
-      if (f.type === "number") {
-        const data = numericHistogram(experiments, f.key);
-        if (data.length > 0) {
-          const values = numericFieldValues(experiments, f.key);
-          trends.push({
-            id: `field:${f.key}`,
-            title: fieldTitle(f),
-            data,
-            values,
-            xLabel: fieldTitle(f),
-            yLabel: "Experiments",
-          });
+      // Chart the plain value, then each specifier variant, each on its own
+      // value-key and labelled with its specifier suffix.
+      const targets: { key: string; variant: FieldVariant | null }[] = [
+        { key: f.key, variant: null },
+        ...(f.variants ?? []).map((v) => ({ key: valueKey(f.key, v.id), variant: v })),
+      ];
+      for (const { key, variant } of targets) {
+        const suffix = variant ? specsSuffix(variant.specs) : "";
+        const title = `${fieldTitle(f)}${suffix}`;
+        const xLabel = title;
+        const idBase = variant ? `field:${f.key}:${variant.id}` : `field:${f.key}`;
+        if (f.type === "number") {
+          const data = numericHistogram(experiments, key);
+          if (data.length === 0) continue;
+          const values = numericFieldValues(experiments, key);
+          trends.push({ id: idBase, title, data, values, xLabel, yLabel: "Experiments" });
+          continue;
         }
-        continue;
+        const data = categoricalDistribution(experiments, key);
+        if (data.length === 0) continue;
+        // Offer a "split" view only when some cell actually held several values.
+        const split = categoricalDistribution(experiments, key, 8, true);
+        const splitData = split.length && !bucketsEqual(split, data) ? split : undefined;
+        trends.push({ id: idBase, title, data, splitData, xLabel, yLabel: "Experiments" });
       }
-      const data = categoricalDistribution(experiments, f.key);
-      if (data.length === 0) continue;
-      // Offer a "split" view only when some cell actually held several values.
-      const split = categoricalDistribution(experiments, f.key, 8, true);
-      const splitData = split.length && !bucketsEqual(split, data) ? split : undefined;
-      trends.push({
-        id: `field:${f.key}`,
-        title: fieldTitle(f),
-        data,
-        splitData,
-        xLabel: fieldTitle(f),
-        yLabel: "Experiments",
-      });
     }
     if (trends.length) sections.push({ id: g.id, label: g.label, trends });
   }

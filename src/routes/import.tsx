@@ -38,7 +38,7 @@ function alloyTypesOf(p: ImportPaperInput): string {
 
 function ImportPage() {
   const fieldDefs = useFieldDefs();
-  const { addImportedFields } = useSettings();
+  const { addImportedFields, addImportedVariants } = useSettings();
   const importer = useImportData();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -81,6 +81,7 @@ function ImportPage() {
       // Register any newly-discovered fields into the live schema first so the
       // imported values are visible and editable in Browse.
       if (parsed.newFields.length) addImportedFields(parsed.newFields);
+      if (parsed.newVariants?.length) addImportedVariants(parsed.newVariants);
       const res = await importer.mutateAsync(parsed.papers);
       setDone(res);
       setParsed(null);
