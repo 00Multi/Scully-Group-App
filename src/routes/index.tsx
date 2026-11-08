@@ -60,6 +60,22 @@ function Dashboard() {
     return { totalCells, filled, missing, na, needsCheck, perField };
   }, [experiments, fieldDefs]);
 
+  // Experiment review status, as a clean partition of every experiment:
+  // trashed (its paper is in the trash), then checked vs unchecked among the
+  // rest. trashed + checked + unchecked === experiments.length.
+  const expStatus = useMemo(() => {
+    const trashedPaperIds = new Set(papers.filter((p) => p.trashed).map((p) => p.id));
+    let trashed = 0;
+    let checked = 0;
+    let unchecked = 0;
+    for (const e of experiments) {
+      if (trashedPaperIds.has(e.paper_id)) trashed++;
+      else if (e.checked) checked++;
+      else unchecked++;
+    }
+    return { trashed, checked, unchecked };
+  }, [experiments, papers]);
+
   // Experiments per alloy type (the field that replaced material categories).
   const alloyCounts = useMemo(
     () => categoricalDistribution(experiments, "alloy_type"),
@@ -164,11 +180,18 @@ function Dashboard() {
         <h1 className="text-5xl font-serif italic tracking-tight">Corrosion review</h1>
       </header>
 
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-        <StatCard label="Papers" value={papers.length} />
-        <StatCard label="Experiments" value={experiments.length} />
-        <StatCard label="Field cells" value={stats.totalCells} />
-        <StatCard label="Filled" value={`${overallPct}%`} accent />
+      <section className="mb-10 space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard label="Papers" value={papers.length} />
+          <StatCard label="Experiments" value={experiments.length} />
+          <StatCard label="Field cells" value={stats.totalCells} />
+          <StatCard label="Filled" value={`${overallPct}%`} accent />
+        </div>
+        <div className="grid grid-cols-3 gap-4">
+          <StatCard label="Checked" value={expStatus.checked} hint="experiments reviewed" />
+          <StatCard label="Unchecked" value={expStatus.unchecked} hint="not yet reviewed" />
+          <StatCard label="Trashed" value={expStatus.trashed} hint="in trashed papers" />
+        </div>
       </section>
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
@@ -612,10 +635,12 @@ function StatCard({
   label,
   value,
   accent,
+  hint,
 }: {
   label: string;
   value: string | number;
   accent?: boolean;
+  hint?: string;
 }) {
   return (
     <div className="rounded-lg border border-rule bg-card px-4 py-3">
@@ -629,6 +654,7 @@ function StatCard({
       >
         {value}
       </div>
+      {hint && <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div>}
     </div>
   );
 }
