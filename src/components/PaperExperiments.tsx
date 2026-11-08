@@ -45,6 +45,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   Circle,
   CheckCheck,
   Columns3,
@@ -475,11 +476,26 @@ export function PaperExperiments({
   // newly-picked, still-empty combo appears while niche combos used only by other
   // papers stay hidden. Reset when the paper changes.
   const [activeVariants, setActiveVariants] = useState<Record<string, Set<string>>>({});
+  // Data points whose specifier combinations are expanded (shown). Collapsed by
+  // default so a paper's data points stay compact; the chevron on a data point
+  // reveals the combinations it uses, and creating/opening one expands it.
+  const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set());
   const [avPaper, setAvPaper] = useState(paper.id);
   if (avPaper !== paper.id) {
     setAvPaper(paper.id);
     setActiveVariants({});
+    setExpandedFields(new Set());
   }
+  const isExpanded = (fieldKey: string) => expandedFields.has(fieldKey);
+  const toggleExpanded = (fieldKey: string) =>
+    setExpandedFields((s) => {
+      const n = new Set(s);
+      if (n.has(fieldKey)) n.delete(fieldKey);
+      else n.add(fieldKey);
+      return n;
+    });
+  const expandField = (fieldKey: string) =>
+    setExpandedFields((s) => (s.has(fieldKey) ? s : new Set(s).add(fieldKey)));
   const activateVariant = (fieldKey: string, variantId: string) =>
     setActiveVariants((m) => {
       const s = new Set(m[fieldKey] ?? []);
@@ -791,6 +807,7 @@ export function PaperExperiments({
     const id = addVariant(field.key, specs);
     if (!id) return;
     activateVariant(field.key, id);
+    expandField(field.key);
     if (!existed) fillVariantNA(valueKey(field.key, id));
   };
 
@@ -1093,6 +1110,8 @@ export function PaperExperiments({
           removeVariant={removeVariant}
           deactivateVariant={deactivateVariant}
           variantUsedHere={variantUsedHere}
+          isExpanded={isExpanded}
+          toggleExpanded={toggleExpanded}
         />
       ) : (
         <MultiView
@@ -1115,6 +1134,8 @@ export function PaperExperiments({
           removeVariant={removeVariant}
           deactivateVariant={deactivateVariant}
           variantUsedHere={variantUsedHere}
+          isExpanded={isExpanded}
+          toggleExpanded={toggleExpanded}
         />
       )}
 
@@ -1202,6 +1223,8 @@ function SingleView({
   removeVariant,
   deactivateVariant,
   variantUsedHere,
+  isExpanded,
+  toggleExpanded,
 }: {
   paper: Paper;
   experiments: Experiment[];
@@ -1231,6 +1254,8 @@ function SingleView({
   removeVariant: (fieldKey: string, variantId: string) => void;
   deactivateVariant: (fieldKey: string, variantId: string) => void;
   variantUsedHere: (key: string) => boolean;
+  isExpanded: (fieldKey: string) => boolean;
+  toggleExpanded: (fieldKey: string) => void;
 }) {
   const baseIsExp = base !== ALL;
   const active = experiments[baseIndex];
@@ -1318,7 +1343,10 @@ function SingleView({
                 // specifier variant that's actually used in this paper (or that
                 // the user just opened via the picker). Niche combos used only by
                 // other papers stay hidden.
-                const variants = shownVariants(f);
+                const allShown = shownVariants(f);
+                const expanded = isExpanded(f.key);
+                // Combo rows are collapsed by default; the chevron reveals them.
+                const variants = expanded ? allShown : [];
                 const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
                   { key: f.key, variant: null },
                   ...variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v })),
@@ -1371,11 +1399,33 @@ function SingleView({
                             ))}
                           </span>
                         ) : (
-                          <SpecifierAdd
-                            field={f}
-                            onCreate={(specs) => createVariant(f, specs)}
-                            openIds={new Set(variants.map((v) => v.id))}
-                          />
+                          <span className="inline-flex items-center gap-1">
+                            {allShown.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => toggleExpanded(f.key)}
+                                aria-expanded={expanded}
+                                title={
+                                  expanded
+                                    ? "Hide specifier combinations"
+                                    : `Show ${allShown.length} specifier combination${allShown.length === 1 ? "" : "s"} used here`
+                                }
+                                className="inline-flex items-center gap-0.5 rounded px-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                              >
+                                {expanded ? (
+                                  <ChevronDown className="h-3 w-3" />
+                                ) : (
+                                  <ChevronRight className="h-3 w-3" />
+                                )}
+                                {allShown.length}
+                              </button>
+                            )}
+                            <SpecifierAdd
+                              field={f}
+                              onCreate={(specs) => createVariant(f, specs)}
+                              openIds={new Set(allShown.map((v) => v.id))}
+                            />
+                          </span>
                         );
                       // Key by the resolved experiment so the editor always shows
                       // a fresh box for whichever experiment the row points at.
@@ -1459,6 +1509,8 @@ function MultiView({
   removeVariant,
   deactivateVariant,
   variantUsedHere,
+  isExpanded,
+  toggleExpanded,
 }: {
   experiments: Experiment[];
   orderedGroups: { id: string; label: string }[];
@@ -1479,6 +1531,8 @@ function MultiView({
   removeVariant: (fieldKey: string, variantId: string) => void;
   deactivateVariant: (fieldKey: string, variantId: string) => void;
   variantUsedHere: (key: string) => boolean;
+  isExpanded: (fieldKey: string) => boolean;
+  toggleExpanded: (fieldKey: string) => void;
 }) {
   const allFields = orderedGroups.flatMap((g) => fieldsByGroup[g.id] ?? []);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1592,6 +1646,8 @@ function MultiView({
               removeVariant={removeVariant}
               deactivateVariant={deactivateVariant}
               variantUsedHere={variantUsedHere}
+              isExpanded={isExpanded}
+              toggleExpanded={toggleExpanded}
             />
           ))}
         </tbody>
@@ -1642,6 +1698,8 @@ function ExpGroupRows({
   removeVariant,
   deactivateVariant,
   variantUsedHere,
+  isExpanded,
+  toggleExpanded,
 }: {
   group: { id: string; label: string };
   fields: FieldDef[];
@@ -1656,6 +1714,8 @@ function ExpGroupRows({
   removeVariant: (fieldKey: string, variantId: string) => void;
   deactivateVariant: (fieldKey: string, variantId: string) => void;
   variantUsedHere: (key: string) => boolean;
+  isExpanded: (fieldKey: string) => boolean;
+  toggleExpanded: (fieldKey: string) => void;
 }) {
   if (fields.length === 0) return null;
   return (
@@ -1672,7 +1732,9 @@ function ExpGroupRows({
         // One row per value-key: the plain value, then one row per specifier
         // variant used in this paper (or just opened via the picker). Niche
         // combos used only by other papers stay hidden.
-        const variants = shownVariants(f);
+        const allShown = shownVariants(f);
+        const expanded = isExpanded(f.key);
+        const variants = expanded ? allShown : [];
         const rowSpecs: { key: string; variant: FieldVariant | null }[] = [
           { key: f.key, variant: null },
           ...variants.map((v) => ({ key: valueKey(f.key, v.id), variant: v })),
@@ -1732,10 +1794,30 @@ function ExpGroupRows({
                   ) : (
                     f.type !== "image" && (
                       <div className="mt-0.5 flex items-center gap-1">
+                        {allShown.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleExpanded(f.key)}
+                            aria-expanded={expanded}
+                            title={
+                              expanded
+                                ? "Hide specifier combinations"
+                                : `Show ${allShown.length} specifier combination${allShown.length === 1 ? "" : "s"} used here`
+                            }
+                            className="inline-flex items-center gap-0.5 rounded px-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                          >
+                            {expanded ? (
+                              <ChevronDown className="h-3 w-3" />
+                            ) : (
+                              <ChevronRight className="h-3 w-3" />
+                            )}
+                            {allShown.length}
+                          </button>
+                        )}
                         <SpecifierAdd
                           field={f}
                           onCreate={(specs) => createVariant(f, specs)}
-                          openIds={new Set(variants.map((v) => v.id))}
+                          openIds={new Set(allShown.map((v) => v.id))}
                         />
                       </div>
                     )
