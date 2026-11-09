@@ -423,9 +423,22 @@ export function PlotExplorer({
 
           {err && <p className="mb-2 text-[10px] text-destructive">{err}</p>}
 
-          <div className="mb-1 text-[10px] text-muted-foreground">
-            {totalPoints} point{totalPoints === 1 ? "" : "s"} · one per experiment with both values
-            · click a point to delete it or edit it in Browse
+          <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted-foreground">
+            <span>
+              {totalPoints} point{totalPoints === 1 ? "" : "s"} · one per experiment with both
+              values · click a point to hide it or edit it in Browse
+            </span>
+            {state.removed.length > 0 && (
+              <button
+                type="button"
+                onClick={() => patch({ removed: [] }, "Show hidden points")}
+                title="Restore every point hidden on this plot"
+                className="inline-flex items-center gap-1 rounded border border-rule px-1.5 py-0.5 text-copper hover:bg-accent"
+              >
+                <Eye className="h-3 w-3" />
+                Show {state.removed.length} hidden
+              </button>
+            )}
           </div>
 
           <div
