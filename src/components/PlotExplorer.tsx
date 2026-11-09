@@ -291,7 +291,7 @@ export function PlotExplorer({
     if (!key) return;
     commit(
       (prev) => (prev.removed.includes(key) ? prev : { ...prev, removed: [...prev.removed, key] }),
-      "Delete point",
+      "Hide point from plot",
     );
   };
 
@@ -758,8 +758,8 @@ export function PlotExplorer({
   );
 }
 
-// A small menu anchored at the clicked point: delete it, or jump to that
-// experiment in Browse to edit its cell values.
+// A small menu anchored at the clicked point: hide it from the plot (the
+// underlying data cell is untouched), or jump to that experiment in Browse.
 function PointMenu({
   menu,
   onClose,
@@ -800,10 +800,15 @@ function PointMenu({
         <button
           type="button"
           onClick={onDelete}
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-destructive hover:bg-destructive/10"
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-foreground hover:bg-accent"
         >
-          <Trash2 className="h-3.5 w-3.5" />
-          Delete point
+          <EyeOff className="h-3.5 w-3.5 text-muted-foreground" />
+          <span>
+            Hide from plot
+            <span className="block text-[10px] text-muted-foreground">
+              Only hides it here — the data cell is kept
+            </span>
+          </span>
         </button>
       </div>
     </div>
