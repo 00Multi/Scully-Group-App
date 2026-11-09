@@ -58,7 +58,7 @@ function solidBackground(color: string): string {
 // given title) to a PNG blob at `scale`× device resolution.
 export async function captureCardPng(
   card: HTMLElement,
-  opts: { title?: string; scale?: number } = {},
+  opts: { title?: string; subtitle?: string; scale?: number } = {},
 ): Promise<Blob> {
   // Grab the Recharts chart specifically — NOT the first <svg>, which would be a
   // lucide toolbar icon (copy/download/toggle buttons render before the chart in
@@ -90,14 +90,14 @@ export async function captureCardPng(
     .querySelectorAll(
       ".recharts-cartesian-axis-tick-value, .recharts-cartesian-axis-tick-value tspan",
     )
-    .forEach((el) => scaleFont(el, 1.45));
+    .forEach((el) => scaleFont(el, 1.85));
   clone
     .querySelectorAll(".recharts-label, .recharts-label tspan")
-    .forEach((el) => scaleFont(el, 1.55));
+    .forEach((el) => scaleFont(el, 2.0));
 
   // Pad the viewBox so the now-larger edge labels are never clipped by the SVG
   // bounds (overflow visible keeps anything just outside on-canvas too).
-  const m = 20;
+  const m = 30;
   const imgW = w + m * 2;
   const imgH = h + m * 2;
   clone.setAttribute("xmlns", SVG_NS);
@@ -114,7 +114,11 @@ export async function captureCardPng(
   const bg = solidBackground(cardStyle.backgroundColor);
   const pad = 16;
   const title = opts.title?.trim();
-  const titleBand = title ? 38 : 0;
+  const subtitle = opts.subtitle?.trim();
+  // Taller bands for the larger title, plus a line for the r subtitle if present.
+  const titleH = title ? 34 : 0;
+  const subH = subtitle ? 24 : 0;
+  const titleBand = title || subtitle ? titleH + subH + 8 : 0;
   const cssW = imgW + pad * 2;
   const cssH = imgH + pad * 2 + titleBand;
 
@@ -127,17 +131,25 @@ export async function captureCardPng(
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, cssW, cssH);
 
-  if (title) {
+  if (title || subtitle) {
     const h3 = card.querySelector("h3");
     const ts = h3 ? getComputedStyle(h3) : cardStyle;
+    const family = ts.fontFamily || "system-ui, sans-serif";
     // Keep the title readable: the card's own text colour (dark), falling back
     // to a dark slate rather than the faint copper header colour.
     const color = ts.color && ts.color !== "rgba(0, 0, 0, 0)" ? ts.color : "#1f2937";
-    ctx.fillStyle = color;
-    ctx.font = `700 18px ${ts.fontFamily || "system-ui, sans-serif"}`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(title, cssW / 2, pad + titleBand / 2);
+    if (title) {
+      ctx.fillStyle = color;
+      ctx.font = `700 23px ${family}`;
+      ctx.fillText(title, cssW / 2, pad + titleH / 2);
+    }
+    if (subtitle) {
+      ctx.fillStyle = "#6b7280";
+      ctx.font = `600 16px ${family}`;
+      ctx.fillText(subtitle, cssW / 2, pad + titleH + subH / 2);
+    }
     ctx.textAlign = "start";
   }
   ctx.drawImage(img, pad, pad + titleBand, imgW, imgH);

@@ -336,7 +336,20 @@ export function PlotExplorer({
     setBusy(how);
     try {
       const title = `${yTitle} vs ${xTitle}`;
-      const png = await captureCardPng(cardRef.current, { title });
+      // With a best-fit line on, annotate the exported image with each visible
+      // series' Pearson r (and n for a single series).
+      let subtitle: string | undefined;
+      if (state.bestFit) {
+        const parts = fits
+          .filter((f) => f.fit)
+          .map((f) => {
+            const r = f.fit!.r;
+            const rStr = `r = ${r >= 0 ? "+" : ""}${fmtNum(r)}`;
+            return visibleCount > 1 ? `${f.name}: ${rStr}` : `${rStr}  (n = ${f.fit!.n})`;
+          });
+        if (parts.length) subtitle = parts.join("     ");
+      }
+      const png = await captureCardPng(cardRef.current, { title, subtitle });
       if (how === "copy") {
         await copyPngToClipboard(png);
         setCopied(true);
