@@ -115,6 +115,42 @@ export function numericFields(experiments: Experiment[], fieldDefs: FieldDef[]):
   return fieldDefs.filter((f) => f.type !== "image" && numericCount(experiments, f.key, 2) >= 2);
 }
 
+// ---- "Big" (pooled) axis keys ----
+// A data point can be plotted as a single specifier (its plain value or one
+// variant) or as a "big" aggregate that pools every specifier of the data point
+// — e.g. big Depth gathers plain Depth plus Depth [Max], Depth [Mo], … A big
+// axis key is the field key with an `all:` prefix.
+export const ALL_PREFIX = "all:";
+export function allKey(fieldKey: string): string {
+  return `${ALL_PREFIX}${fieldKey}`;
+}
+export function isAllKey(key: string): boolean {
+  return key.startsWith(ALL_PREFIX);
+}
+export function allFieldKey(key: string): string {
+  return key.slice(ALL_PREFIX.length);
+}
+
+// The value-keys an axis key reads from an experiment: a big key spreads to the
+// data point's plain value plus every variant; any other key is just itself.
+export function spreadKeys(fieldDefs: FieldDef[], key: string): string[] {
+  if (!isAllKey(key)) return [key];
+  const field = fieldDefs.find((f) => f.key === allFieldKey(key));
+  if (!field) return [];
+  return [field.key, ...(field.variants ?? []).map((v) => valueKey(field.key, v.id))];
+}
+
+// Every finite numeric value an experiment holds for an axis key. A plain or
+// variant key yields at most one; a big key yields all its specifiers' values.
+export function axisValues(e: Experiment, fieldDefs: FieldDef[], key: string): number[] {
+  const out: number[] = [];
+  for (const k of spreadKeys(fieldDefs, key)) {
+    const n = toNumber(e.values?.[k]?.value);
+    if (n != null) out.push(n);
+  }
+  return out;
+}
+
 // Split a value-key back into its field key and optional variant id.
 export function parseKey(key: string): { fieldKey: string; variantId: string | null } {
   const i = key.indexOf("::");
@@ -127,6 +163,9 @@ export function keyField(
   fieldDefs: FieldDef[],
   key: string,
 ): { field: FieldDef | null; variant: FieldVariant | null } {
+  if (isAllKey(key)) {
+    return { field: fieldDefs.find((f) => f.key === allFieldKey(key)) ?? null, variant: null };
+  }
   const { fieldKey, variantId } = parseKey(key);
   const field = fieldDefs.find((f) => f.key === fieldKey) ?? null;
   const variant =
@@ -134,10 +173,13 @@ export function keyField(
   return { field, variant };
 }
 
-// The axis title for a value-key, e.g. "Depth (µm) [Min, Mo]".
+// The axis title for a value-key, e.g. "Depth (µm) [Min, Mo]". A big key that
+// actually pools variants is marked "(all)".
 export function keyTitle(fieldDefs: FieldDef[], key: string): string {
   const { field, variant } = keyField(fieldDefs, key);
-  return field ? variantLabel(field, variant) : key;
+  if (!field) return key;
+  if (isAllKey(key) && (field.variants?.length ?? 0) > 0) return `${fieldTitle(field)} (all)`;
+  return variantLabel(field, variant);
 }
 
 // Grouped axis options for the X/Y selects. A data point with specifier variants
@@ -158,8 +200,13 @@ export function axisOptions(experiments: Experiment[], fieldDefs: FieldDef[]): A
       numericCount(experiments, f.key, 2) >= 2 ||
       variants.some((v) => numericCount(experiments, valueKey(f.key, v.id), 2) >= 2);
     if (!plottable) continue;
+    const hasVariants = variants.length > 0;
     const options = [
-      { key: f.key, label: variantLabel(f, null) },
+      // A data point with specifiers also offers a "big" aggregate (all
+      // specifiers pooled) and a "plain only" option, so the user can plot the
+      // whole category or one specifier.
+      ...(hasVariants ? [{ key: allKey(f.key), label: `${fieldTitle(f)} — all specifiers` }] : []),
+      { key: f.key, label: hasVariants ? `${fieldTitle(f)} — plain only` : variantLabel(f, null) },
       ...variants.map((v) => ({ key: valueKey(f.key, v.id), label: variantLabel(f, v) })),
     ];
     out.push({ field: f, options });
@@ -216,6 +263,7 @@ export interface PlotPoint {
 export function seriesPoints(
   series: Series,
   experiments: Experiment[],
+  fieldDefs: FieldDef[],
   citeById: Map<string, string>,
   xKey: string,
   yKey: string,
@@ -224,13 +272,23 @@ export function seriesPoints(
   const pts: PlotPoint[] = [];
   for (const e of experiments) {
     if (!matchesConstraints(e, series.constraints)) continue;
-    const x = toNumber(e.values?.[xKey]?.value);
-    const y = toNumber(e.values?.[yKey]?.value);
-    if (x == null || y == null) continue;
-    const key = `${series.id}::${e.id}`;
-    if (removed.has(key)) continue;
+    const xs = axisValues(e, fieldDefs, xKey);
+    if (xs.length === 0) continue;
+    const ys = axisValues(e, fieldDefs, yKey);
+    if (ys.length === 0) continue;
+    // A big axis can yield several values for one experiment; plot each.
+    const single = xs.length === 1 && ys.length === 1;
     const cite = citeById.get(e.paper_id) || "Unknown";
-    pts.push({ x, y, key, expId: e.id, paperId: e.paper_id, label: `${cite} · ${e.label}` });
+    let idx = 0;
+    for (const x of xs) {
+      for (const y of ys) {
+        // Keep the simple id when there's one point per experiment so previously
+        // deleted points still match; suffix only when a big axis expands it.
+        const key = single ? `${series.id}::${e.id}` : `${series.id}::${e.id}::${idx++}`;
+        if (removed.has(key)) continue;
+        pts.push({ x, y, key, expId: e.id, paperId: e.paper_id, label: `${cite} · ${e.label}` });
+      }
+    }
   }
   pts.sort((a, b) => a.x - b.x);
   return pts;
@@ -283,11 +341,9 @@ export function linearFit(points: { x: number; y: number }[]): FitResult | null 
 }
 
 // ---- Correlation ranking ----
-// Every pair of numeric data points (plain value or specifier variant), with the
-// Pearson correlation of the experiments that have both. Pairs of the same data
-// point (plain vs its own variant) are skipped — that isn't an X-vs-Y
-// relationship — and pairs with fewer than `minN` shared points are dropped
-// since a two-point "fit" is always ±1.
+// A pair of axis keys and the Pearson correlation of the experiments that have
+// both. Pairs with fewer than `minN` points are dropped (a two-point "fit" is
+// always ±1).
 export interface PairCorrelation {
   xKey: string;
   yKey: string;
@@ -298,43 +354,95 @@ export interface PairCorrelation {
   n: number;
 }
 
-export function rankedCorrelations(
+// (x, y) points for a key pair; a big key expands to every specifier value
+// (crossed with the other axis for that experiment).
+function pairPoints(
+  experiments: Experiment[],
+  fieldDefs: FieldDef[],
+  xKey: string,
+  yKey: string,
+): { x: number; y: number }[] {
+  const pts: { x: number; y: number }[] = [];
+  for (const e of experiments) {
+    const xs = axisValues(e, fieldDefs, xKey);
+    if (!xs.length) continue;
+    const ys = axisValues(e, fieldDefs, yKey);
+    if (!ys.length) continue;
+    for (const x of xs) for (const y of ys) pts.push({ x, y });
+  }
+  return pts;
+}
+
+function correlate(
+  experiments: Experiment[],
+  fieldDefs: FieldDef[],
+  x: { key: string; label: string },
+  y: { key: string; label: string },
+  minN: number,
+): PairCorrelation | null {
+  const pts = pairPoints(experiments, fieldDefs, x.key, y.key);
+  if (pts.length < minN) return null;
+  const fit = linearFit(pts);
+  if (!fit) return null;
+  return {
+    xKey: x.key,
+    yKey: y.key,
+    xLabel: x.label,
+    yLabel: y.label,
+    r: fit.r,
+    r2: fit.r2,
+    n: fit.n,
+  };
+}
+
+// "Big" relationships: one entry per pair of data points, each pooling its plain
+// value and every specifier variant. A data point with variants uses its big
+// aggregate key; a plain data point uses its own key. Same-field pairs are n/a.
+export function bigCorrelations(
   experiments: Experiment[],
   fieldDefs: FieldDef[],
   minN = 3,
 ): PairCorrelation[] {
-  // All numeric axis keys (plain values and variants that actually carry data).
+  const fields = axisOptions(experiments, fieldDefs).map((g) => g.field);
+  const axisFor = (f: FieldDef) => ({
+    key: (f.variants?.length ?? 0) > 0 ? allKey(f.key) : f.key,
+    label: fieldTitle(f),
+  });
+  const out: PairCorrelation[] = [];
+  for (let i = 0; i < fields.length; i++) {
+    for (let j = i + 1; j < fields.length; j++) {
+      const c = correlate(experiments, fieldDefs, axisFor(fields[i]), axisFor(fields[j]), minN);
+      if (c) out.push(c);
+    }
+  }
+  return out;
+}
+
+// "Specifier" relationships: pairs where at least one side is a specific
+// specifier variant (across different data points) — the granular counterpart
+// to the big view.
+export function specifierCorrelations(
+  experiments: Experiment[],
+  fieldDefs: FieldDef[],
+  minN = 3,
+): PairCorrelation[] {
   const keys: { key: string; label: string }[] = [];
   for (const g of axisOptions(experiments, fieldDefs)) {
     for (const o of g.options) {
+      if (isAllKey(o.key)) continue; // the aggregate option belongs to the big view
       if (numericCount(experiments, o.key, 2) >= 2) keys.push(o);
     }
   }
+  const isVariant = (k: string) => k.includes("::");
   const out: PairCorrelation[] = [];
   for (let i = 0; i < keys.length; i++) {
     for (let j = i + 1; j < keys.length; j++) {
       const a = keys[i];
       const b = keys[j];
       if (parseKey(a.key).fieldKey === parseKey(b.key).fieldKey) continue;
-      const pts: { x: number; y: number }[] = [];
-      for (const e of experiments) {
-        const x = toNumber(e.values?.[a.key]?.value);
-        const y = toNumber(e.values?.[b.key]?.value);
-        if (x == null || y == null) continue;
-        pts.push({ x, y });
-      }
-      if (pts.length < minN) continue;
-      const fit = linearFit(pts);
-      if (!fit) continue;
-      out.push({
-        xKey: a.key,
-        yKey: b.key,
-        xLabel: a.label,
-        yLabel: b.label,
-        r: fit.r,
-        r2: fit.r2,
-        n: fit.n,
-      });
+      if (!isVariant(a.key) && !isVariant(b.key)) continue;
+      const c = correlate(experiments, fieldDefs, a, b, minN);
+      if (c) out.push(c);
     }
   }
   return out;
