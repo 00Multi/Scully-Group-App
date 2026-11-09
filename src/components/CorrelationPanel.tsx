@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, Star, StickyNote, TrendingUp } from "lucide-react";
 import type { Experiment } from "@/lib/db";
 import type { FieldDef } from "@/lib/fields";
-import { fmtNum, rankedCorrelations, type PairCorrelation } from "@/lib/plot";
+import { bigCorrelations, fmtNum, specifierCorrelations, type PairCorrelation } from "@/lib/plot";
 
 const STORAGE_KEY = "plot.corr.v1";
 
@@ -46,7 +46,15 @@ export function CorrelationPanel({
   activeY: string;
   onPick: (xKey: string, yKey: string) => void;
 }) {
-  const pairs = useMemo(() => rankedCorrelations(experiments, fieldDefs), [experiments, fieldDefs]);
+  // Two views: "big" pools each data point's specifiers into one category;
+  // "spec" shows relationships involving a specific specifier variant.
+  const [tab, setTab] = useState<"big" | "spec">("big");
+  const bigPairs = useMemo(() => bigCorrelations(experiments, fieldDefs), [experiments, fieldDefs]);
+  const specPairs = useMemo(
+    () => specifierCorrelations(experiments, fieldDefs),
+    [experiments, fieldDefs],
+  );
+  const pairs = tab === "big" ? bigPairs : specPairs;
 
   // Strongest (|r|) first by default; the toggle flips to weakest first.
   const [desc, setDesc] = useState(true);
@@ -148,16 +156,44 @@ export function CorrelationPanel({
         </div>
       </div>
 
+      <div className="mb-2 inline-flex overflow-hidden rounded-md border border-rule text-xs">
+        {(
+          [
+            ["big", "Big"],
+            ["spec", "Specifiers"],
+          ] as [typeof tab, string][]
+        ).map(([k, lbl]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setTab(k)}
+            className={
+              "px-3 py-1 transition-colors " +
+              (tab === k
+                ? "bg-primary text-primary-foreground"
+                : "text-muted-foreground hover:bg-accent")
+            }
+          >
+            {lbl}
+          </button>
+        ))}
+      </div>
+
       <p className="mb-2 text-[11px] text-muted-foreground">
-        Pearson r across every experiment with both values. Click a pair to load it into the plot.
-        Strong |r| doesn't prove causation — check the scatter and point count (n).
+        {tab === "big"
+          ? "Each data point's specifiers are pooled into one “big” category. "
+          : "Relationships that involve a specific specifier variant. "}
+        Pearson r across every experiment with both values. Click a pair to load it into the plot;
+        strong |r| doesn't prove causation — check the scatter and point count (n).
       </p>
 
       {rows.length === 0 ? (
         <p className="py-6 text-center text-sm italic text-muted-foreground">
           {favOnly
             ? "No favorites yet — star a pair to pin it here."
-            : "Not enough numeric data to correlate yet."}
+            : tab === "big"
+              ? "Not enough numeric data to correlate yet."
+              : "No specifier-level relationships yet — add specifier variants that hold data."}
         </p>
       ) : (
         <ul className="divide-y divide-rule/60">

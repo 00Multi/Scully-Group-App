@@ -216,7 +216,15 @@ export function PlotExplorer({
         series: s,
         color: seriesColor(s, i, state.series.length, state.palette),
         shape: state.varyShapes ? POINT_SHAPES[i % POINT_SHAPES.length] : "circle",
-        points: seriesPoints(s, experiments, citeById, state.xKey, state.yKey, removedSet),
+        points: seriesPoints(
+          s,
+          experiments,
+          fieldDefs,
+          citeById,
+          state.xKey,
+          state.yKey,
+          removedSet,
+        ),
       })),
     [
       state.series,
@@ -225,6 +233,7 @@ export function PlotExplorer({
       state.xKey,
       state.yKey,
       experiments,
+      fieldDefs,
       citeById,
       removedSet,
     ],
@@ -826,7 +835,10 @@ function AxisSelect({
       >
         {groups.map(({ field, options }) =>
           options.length > 1 ? (
-            <optgroup key={field.key} label={options[0].label}>
+            <optgroup
+              key={field.key}
+              label={field.unit ? `${field.label} (${field.unit})` : field.label}
+            >
               {options.map((o) => (
                 <option key={o.key} value={o.key}>
                   {o.label}
