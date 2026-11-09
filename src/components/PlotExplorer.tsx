@@ -39,6 +39,7 @@ import {
   constrainableFields,
   distinctValues,
   fmtNum,
+  fmtP,
   initialPlotState,
   keyTitle,
   linearFit,
@@ -345,7 +346,10 @@ export function PlotExplorer({
           .map((f) => {
             const r = f.fit!.r;
             const rStr = `r = ${r >= 0 ? "+" : ""}${fmtNum(r)}`;
-            return visibleCount > 1 ? `${f.name}: ${rStr}` : `${rStr}  (n = ${f.fit!.n})`;
+            const pStr = fmtP(f.fit!.p);
+            return visibleCount > 1
+              ? `${f.name}: ${rStr}, ${pStr}`
+              : `${rStr}  ·  ${pStr}  ·  n = ${f.fit!.n}`;
           });
         if (parts.length) subtitle = parts.join("     ");
       }
@@ -570,6 +574,8 @@ export function PlotExplorer({
                       <span className="font-mono text-foreground">{fmtNum(fit.r)}</span>
                       <span className="text-muted-foreground">·</span>
                       R² <span className="font-mono text-foreground">{fmtNum(fit.r2)}</span>
+                      <span className="text-muted-foreground">·</span>
+                      <span className="font-mono text-foreground">{fmtP(fit.p)}</span>
                     </>
                   ) : (
                     <span className="italic text-muted-foreground">too few points</span>
