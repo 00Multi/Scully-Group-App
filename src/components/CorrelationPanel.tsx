@@ -159,7 +159,7 @@ export function CorrelationPanel({
       <div className="mb-2 inline-flex overflow-hidden rounded-md border border-rule text-xs">
         {(
           [
-            ["big", "Big"],
+            ["big", "Non-specified"],
             ["spec", "Specifiers"],
           ] as [typeof tab, string][]
         ).map(([k, lbl]) => (
@@ -181,7 +181,7 @@ export function CorrelationPanel({
 
       <p className="mb-2 text-[11px] text-muted-foreground">
         {tab === "big"
-          ? "Each data point's specifiers are pooled into one “big” category. "
+          ? "Each data point pools all its specifiers into one non-specified category. "
           : "Relationships that involve a specific specifier variant. "}
         Pearson r across every experiment with both values. Click a pair to load it into the plot;
         strong |r| doesn't prove causation — check the scatter and point count (n).
