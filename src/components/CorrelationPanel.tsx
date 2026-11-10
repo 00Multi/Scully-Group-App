@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDownWideNarrow, ArrowUpNarrowWide, Star, StickyNote, TrendingUp } from "lucide-react";
 import type { Experiment } from "@/lib/db";
 import type { FieldDef } from "@/lib/fields";
-import { bigCorrelations, fmtNum, specifierCorrelations, type PairCorrelation } from "@/lib/plot";
+import {
+  bigCorrelations,
+  fmtNum,
+  fmtP,
+  specifierCorrelations,
+  type PairCorrelation,
+} from "@/lib/plot";
 
 const STORAGE_KEY = "plot.corr.v1";
 
@@ -56,8 +62,14 @@ export function CorrelationPanel({
   );
   const pairs = tab === "big" ? bigPairs : specPairs;
 
-  // Strongest (|r|) first by default; the toggle flips to weakest first.
+  // Sort by correlation strength (|r|) or by p-value. For |r|, "desc" is
+  // strongest first; for p, the default is most-significant (smallest p) first.
+  const [sortBy, setSortBy] = useState<"r" | "p">("r");
   const [desc, setDesc] = useState(true);
+  const setSort = (key: "r" | "p") => {
+    setSortBy(key);
+    setDesc(key === "r"); // r → strongest first; p → most significant first
+  };
   const [favOnly, setFavOnly] = useState(false);
   const [store, setStore] = useState<Store>({ favorites: [], notes: {} });
   const [loaded, setLoaded] = useState(false);
@@ -80,11 +92,14 @@ export function CorrelationPanel({
   const favSet = useMemo(() => new Set(store.favorites), [store.favorites]);
 
   const rows = useMemo(() => {
-    const sorted = [...pairs].sort((a, b) =>
-      desc ? Math.abs(b.r) - Math.abs(a.r) : Math.abs(a.r) - Math.abs(b.r),
-    );
+    const metric = (x: PairCorrelation) =>
+      sortBy === "p" ? (Number.isFinite(x.p) ? x.p : 1) : Math.abs(x.r);
+    const sorted = [...pairs].sort((a, b) => {
+      const d = metric(a) - metric(b);
+      return desc ? -d : d;
+    });
     return favOnly ? sorted.filter((p) => favSet.has(pairId(p.xKey, p.yKey))) : sorted;
-  }, [pairs, desc, favOnly, favSet]);
+  }, [pairs, sortBy, desc, favOnly, favSet]);
 
   const toggleFav = (id: string) =>
     setStore((s) => ({
@@ -110,6 +125,17 @@ export function CorrelationPanel({
 
   const isActive = (p: PairCorrelation) =>
     (p.xKey === activeX && p.yKey === activeY) || (p.xKey === activeY && p.yKey === activeX);
+
+  const dirLabel =
+    sortBy === "p" ? (desc ? "Least sig." : "Most sig.") : desc ? "Strongest" : "Weakest";
+  const dirTitle =
+    sortBy === "p"
+      ? desc
+        ? "Sorted least significant first — click for most significant"
+        : "Sorted most significant first — click for least significant"
+      : desc
+        ? "Sorted strongest first — click for weakest first"
+        : "Sorted weakest first — click for strongest first";
 
   return (
     <div className="rounded-lg border border-rule bg-card p-4">
@@ -138,12 +164,16 @@ export function CorrelationPanel({
           </button>
           <button
             type="button"
+            onClick={() => setSort(sortBy === "r" ? "p" : "r")}
+            title="Sort by correlation strength (|r|) or by p-value"
+            className="inline-flex items-center gap-1 rounded-md border border-rule px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+          >
+            Sort: {sortBy === "r" ? "|r|" : "p"}
+          </button>
+          <button
+            type="button"
             onClick={() => setDesc((v) => !v)}
-            title={
-              desc
-                ? "Sorted strongest first — click for weakest first"
-                : "Sorted weakest first — click for strongest first"
-            }
+            title={dirTitle}
             className="inline-flex items-center gap-1 rounded-md border border-rule px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
           >
             {desc ? (
@@ -151,7 +181,7 @@ export function CorrelationPanel({
             ) : (
               <ArrowUpNarrowWide className="h-3.5 w-3.5" />
             )}
-            {desc ? "Strongest" : "Weakest"}
+            {dirLabel}
           </button>
         </div>
       </div>
@@ -228,6 +258,12 @@ export function CorrelationPanel({
                   >
                     r = {p.r >= 0 ? "+" : ""}
                     {fmtNum(p.r)}
+                  </span>
+                  <span
+                    className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums"
+                    title="two-tailed p-value (H0: no correlation)"
+                  >
+                    {fmtP(p.p)}
                   </span>
                   <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
                     n={p.n}
