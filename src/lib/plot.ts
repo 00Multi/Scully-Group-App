@@ -438,6 +438,7 @@ export interface PairCorrelation {
   r: number;
   r2: number;
   n: number;
+  p: number; // two-tailed p-value for the correlation
 }
 
 // (x, y) points for a key pair; a big key expands to every specifier value
@@ -478,6 +479,7 @@ function correlate(
     r: fit.r,
     r2: fit.r2,
     n: fit.n,
+    p: fit.p,
   };
 }
 
