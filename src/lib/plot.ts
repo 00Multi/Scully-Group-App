@@ -310,6 +310,92 @@ export interface FitResult {
   n: number;
   x0: number; // smallest x among the points
   x1: number; // largest x among the points
+  p: number; // two-tailed p-value for the correlation (H0: r = 0)
+}
+
+// ---- Significance of a correlation ----
+// Natural log of the gamma function (Lanczos approximation).
+function logGamma(x: number): number {
+  // Published Lanczos coefficients; their final digits aren't exactly
+  // representable as doubles, which is immaterial here.
+  /* eslint-disable no-loss-of-precision */
+  const cof = [
+    76.18009172947146, -86.50532032941677, 24.01409824083091, -1.231739572450155,
+    0.1208650973866179e-2, -0.5395239384953e-5,
+  ];
+  /* eslint-enable no-loss-of-precision */
+  let y = x;
+  let tmp = x + 5.5;
+  tmp -= (x + 0.5) * Math.log(tmp);
+  let ser = 1 + 1.90015e-10;
+  for (let j = 0; j < 6; j++) ser += cof[j] / ++y;
+  return -tmp + Math.log((Math.sqrt(2 * Math.PI) * ser) / x);
+}
+
+// Continued-fraction core of the incomplete beta function (Numerical Recipes).
+function betacf(a: number, b: number, x: number): number {
+  const MAXIT = 200;
+  const EPS = 3e-12;
+  const FPMIN = 1e-300;
+  const qab = a + b;
+  const qap = a + 1;
+  const qam = a - 1;
+  let c = 1;
+  let d = 1 - (qab * x) / qap;
+  if (Math.abs(d) < FPMIN) d = FPMIN;
+  d = 1 / d;
+  let h = d;
+  for (let m = 1; m <= MAXIT; m++) {
+    const m2 = 2 * m;
+    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    h *= d * c;
+    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
+    d = 1 + aa * d;
+    if (Math.abs(d) < FPMIN) d = FPMIN;
+    c = 1 + aa / c;
+    if (Math.abs(c) < FPMIN) c = FPMIN;
+    d = 1 / d;
+    const del = d * c;
+    h *= del;
+    if (Math.abs(del - 1) < EPS) break;
+  }
+  return h;
+}
+
+// Regularized incomplete beta I_x(a, b).
+function regIncBeta(a: number, b: number, x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const bt = Math.exp(
+    logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x),
+  );
+  return x < (a + 1) / (a + b + 2)
+    ? (bt * betacf(a, b, x)) / a
+    : 1 - (bt * betacf(b, a, 1 - x)) / b;
+}
+
+// Two-tailed p-value for a Pearson correlation r from n points, testing the null
+// hypothesis of no correlation. Uses the t statistic t = r·√((n−2)/(1−r²)) whose
+// two-sided tail equals I_{df/(df+t²)}(df/2, 1/2).
+export function correlationPValue(r: number, n: number): number {
+  const df = n - 2;
+  if (df <= 0) return NaN;
+  const r2 = Math.min(r * r, 1);
+  if (r2 >= 1) return 0;
+  const t2 = (r2 * df) / (1 - r2);
+  return regIncBeta(df / 2, 0.5, df / (df + t2));
+}
+
+// Format a p-value compactly, e.g. "p < 0.001" or "p = 0.042".
+export function fmtP(p: number): string {
+  if (!Number.isFinite(p)) return "p —";
+  if (p < 0.001) return "p < 0.001";
+  return `p = ${p.toFixed(3)}`;
 }
 export function linearFit(points: { x: number; y: number }[]): FitResult | null {
   const n = points.length;
@@ -337,7 +423,7 @@ export function linearFit(points: { x: number; y: number }[]): FitResult | null 
   const dyy = n * syy - sy * sy;
   const denom = Math.sqrt(dxx * dyy);
   const r = denom === 0 ? 0 : (n * sxy - sx * sy) / denom;
-  return { slope, intercept, r, r2: r * r, n, x0, x1 };
+  return { slope, intercept, r, r2: r * r, n, x0, x1, p: correlationPValue(r, n) };
 }
 
 // ---- Correlation ranking ----
