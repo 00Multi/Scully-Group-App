@@ -264,7 +264,7 @@ function esc(s: unknown): string {
   return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
 }
 
-export function buildReportHtml(data: ExportData): string {
+export function buildReportHtml(data: ExportData, imgMap?: Map<string, string>): string {
   const paperById = new Map(data.papers.map((p) => [p.id, p]));
   const columns = orderedColumnsOf(data);
 
@@ -322,7 +322,7 @@ export function buildReportHtml(data: ExportData): string {
                 ? `<tr><th>${esc(th)}</th><td>${srcs
                     .map(
                       (src) =>
-                        `<img src="${esc(src)}" style="max-height:200px;max-width:100%;margin:0 4px 4px 0"/>`,
+                        `<img src="${esc(imgMap?.get(src) ?? src)}" loading="eager" decoding="sync" style="max-height:200px;max-width:100%;margin:0 4px 4px 0"/>`,
                     )
                     .join("")}</td></tr>`
                 : "";
@@ -362,16 +362,143 @@ ${body || "<p>No records to report.</p>"}
 </body></html>`;
 }
 
-export function openPrintReport(data: ExportData) {
-  const html = buildReportHtml(data);
+// Every distinct image URL the report will embed (image fields only).
+function reportImageUrls(data: ExportData): string[] {
+  const imgCols = orderedColumnsOf(data).filter((c) => c.field.type === "image");
+  const urls = new Set<string>();
+  for (const e of data.experiments) {
+    for (const c of imgCols) {
+      const v = e.values?.[c.key];
+      if (v && v.state === "filled") {
+        for (const u of imageUrls(v)) if (u && !u.startsWith("data:")) urls.add(u);
+      }
+    }
+  }
+  return [...urls];
+}
+
+// Fetch an image and return a downscaled JPEG data URL. Downscaling keeps the
+// report payload tiny (the images display at ~200px) so it loads and prints
+// fast; returns null on any failure so the caller can fall back to the URL.
+async function fetchResizedDataUrl(
+  url: string,
+  maxDim = 700,
+  quality = 0.82,
+  timeoutMs = 12000,
+): Promise<string | null> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, cache: "force-cache" });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob.type.startsWith("image/")) return null;
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bmp.close?.();
+      return null;
+    }
+    // White matte so transparent PNGs don't print as black on the page.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close?.();
+    return canvas.toDataURL("image/jpeg", quality);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Prefetch and downscale every report image in parallel (bounded), returning a
+// map from original URL to inlined data URL. Failed images are simply omitted.
+async function prepareReportImages(
+  data: ExportData,
+  onProgress?: (done: number, total: number) => void,
+): Promise<Map<string, string>> {
+  const urls = reportImageUrls(data);
+  const map = new Map<string, string>();
+  const total = urls.length;
+  let done = 0;
+  onProgress?.(0, total);
+  let next = 0;
+  const worker = async () => {
+    while (next < urls.length) {
+      const url = urls[next++];
+      const dataUrl = await fetchResizedDataUrl(url);
+      if (dataUrl) map.set(url, dataUrl);
+      onProgress?.(++done, total);
+    }
+  };
+  // Up to 12 in flight: HTTP/2 multiplexes these over one connection to storage,
+  // so the whole set downloads in a few round-trips rather than one at a time.
+  await Promise.all(Array.from({ length: Math.min(12, urls.length) }, worker));
+  return map;
+}
+
+export async function openPrintReport(data: ExportData) {
   const w = window.open("", "_blank");
   if (!w) {
     alert("Please allow pop-ups to open the printable report.");
     return;
   }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-  // Give the new document a tick to lay out before invoking print.
-  w.onload = () => setTimeout(() => w.print(), 300);
+  const status = (msg: string) => {
+    try {
+      w.document.open();
+      w.document.write(
+        `<!doctype html><html><head><meta charset="utf-8"><title>Preparing report…</title></head>` +
+          `<body style="font-family:system-ui,sans-serif;color:#555;padding:2rem;font-size:14px">${msg}</body></html>`,
+      );
+      w.document.close();
+    } catch {
+      /* popup closed */
+    }
+  };
+  status("Preparing report…");
+
+  // Inline downscaled images so the print document needs no network and renders
+  // immediately — the old version printed on a fixed 300ms timer, before the
+  // full-resolution images had loaded.
+  let imgMap = new Map<string, string>();
+  try {
+    imgMap = await prepareReportImages(data, (d, t) => {
+      if (t) status(`Preparing report… loading images ${d}/${t}`);
+    });
+  } catch {
+    /* fall back to remote <img> URLs */
+  }
+
+  try {
+    w.document.open();
+    w.document.write(buildReportHtml(data, imgMap));
+    w.document.close();
+  } catch {
+    return; // popup was closed
+  }
+
+  // Wait for the (now inline) images to actually decode, capped so a stray
+  // image can't stall the print dialog, then print.
+  try {
+    const imgs = Array.from(w.document.images || []);
+    await Promise.race([
+      Promise.allSettled(imgs.map((im) => im.decode?.().catch(() => {}) ?? Promise.resolve())),
+      new Promise((r) => setTimeout(r, 2500)),
+    ]);
+  } catch {
+    /* ignore */
+  }
+  try {
+    w.focus();
+    w.print();
+  } catch {
+    /* popup closed before printing */
+  }
 }

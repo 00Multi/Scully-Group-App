@@ -81,6 +81,7 @@ function ExportPage() {
   const { data: experiments = [] } = useExperiments();
   const { groups, fieldDefs } = useSettings();
   const [preview, setPreview] = useState(false);
+  const [reportBusy, setReportBusy] = useState(false);
   const [selectedAlloys, setSelectedAlloys] = useState<Set<string>>(() => new Set());
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState<StateFilter>("any");
@@ -601,8 +602,16 @@ function ExportPage() {
           icon={<Printer className="h-5 w-5" />}
           title="PDF report"
           desc="Formatted report grouped by alloy type — opens the print dialog (save as PDF)."
-          action="Print report"
-          onClick={() => openPrintReport(exportData)}
+          action={reportBusy ? "Preparing…" : "Print report"}
+          disabled={reportBusy}
+          onClick={async () => {
+            setReportBusy(true);
+            try {
+              await openPrintReport(exportData);
+            } finally {
+              setReportBusy(false);
+            }
+          }}
         />
       </div>
 
